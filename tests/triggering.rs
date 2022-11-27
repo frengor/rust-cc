@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::mem::size_of;
 
-use rust_cc::{collect_cycles, Cc, Context, Trace};
+use rust_cc::{collect_cycles, Cc, Context, Trace, Finalize};
 use rust_cc::state::execution_count;
 
 #[test]
@@ -19,6 +19,9 @@ fn print_triggers() {
         fn trace(&self, ctx: &mut Context<'_>) {
             self.inner.trace(ctx);
         }
+    }
+
+    impl Finalize for Traceable {
     }
 
     fn new() -> Cc<Traceable> {
@@ -75,6 +78,9 @@ fn test_trigger() {
                 cc.trace(ctx);
             }
         }
+    }
+
+    impl Finalize for Traceable {
     }
 
     {

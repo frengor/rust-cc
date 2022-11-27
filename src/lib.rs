@@ -2,8 +2,6 @@
 #![feature(coerce_unsized)]
 #![feature(unsize)]
 #![feature(negative_impls)]
-#![feature(specialization)]
-#![allow(incomplete_features)] // Shout specialization warning
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;

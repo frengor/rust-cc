@@ -143,6 +143,9 @@ fn test_panicking_drop() {
         }
     }
 
+    impl Finalize for DropPanicking {
+    }
+
     impl Drop for DropPanicking {
         fn drop(&mut self) {
             panic!("Test panic on Drop");

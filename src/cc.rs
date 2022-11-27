@@ -9,7 +9,7 @@ use crate::counter_marker::{CounterMarker, Mark, OverflowError};
 use crate::state::{replace_state_field, state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
-use crate::{trigger_collection, POSSIBLE_CYCLES, try_state};
+use crate::{trigger_collection, try_state, POSSIBLE_CYCLES};
 
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
@@ -213,6 +213,13 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         // If Cc is alive then we can always access the underlying CcOnHeap
         unsafe { self.inner.as_ref() }
     }
+
+    /// Note: don't access self.inner_mut().elem if CcOnHeap is not valid!
+    #[inline(always)]
+    fn _inner_mut(&mut self) -> &mut CcOnHeap<T> {
+        // If Cc is alive then we can always access the underlying CcOnHeap
+        unsafe { self.inner.as_mut() }
+    }
 }
 
 impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
@@ -357,24 +364,18 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     }
 }
 
+impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {
+}
+
 #[repr(C)]
 pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     next: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
     prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
-    vtable: Vtable,
+    vtable: DynMetadata<dyn Trace>,
 
     counter_marker: UnsafeCell<CounterMarker>,
 
     elem: T,
-}
-
-// Use an union instead of an enum since the discriminant is counter_marker.is_finalizable().
-// The trace_finalize variant is used when counter_marker.is_finalizable() is true, otherwise trace is used.
-#[derive(Copy, Clone)]
-#[repr(C)]
-union Vtable {
-    trace: DynMetadata<dyn Trace>,
-    trace_finalize: DynMetadata<dyn TraceFinalize>,
 }
 
 impl<T: ?Sized + Trace + 'static> !Send for CcOnHeap<T> {}
@@ -387,16 +388,13 @@ impl<T: Trace + 'static> CcOnHeap<T> {
         let layout = Layout::new::<CcOnHeap<T>>();
         unsafe {
             let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout);
-            let (vtable, finalizable) = <Self as FinalizeSpecialization<Self>>::get_vtable(ptr);
             ptr::write(
                 ptr.as_ptr(),
                 CcOnHeap {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
-                    vtable,
-                    counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(
-                        finalizable,
-                    )),
+                    vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
+                    counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(true)),
                     elem: t,
                 },
             );
@@ -417,16 +415,14 @@ impl<T: Trace + 'static> CcOnHeap<T> {
         let layout = Layout::new::<CcOnHeap<MaybeUninit<T>>>();
         unsafe {
             let ptr: NonNull<CcOnHeap<MaybeUninit<T>>> = cc_alloc(layout);
-            let (vtable, finalizable) =
-                <CcOnHeap<T> as FinalizeSpecialization<CcOnHeap<T>>>::get_vtable(ptr.cast());
             ptr::write(
                 ptr.as_ptr(),
                 CcOnHeap {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
-                    vtable,
+                    vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace),
                     counter_marker: UnsafeCell::new({
-                        let mut cm = CounterMarker::new_with_counter_to_one(finalizable);
+                        let mut cm = CounterMarker::new_with_counter_to_one(true);
                         cm.mark(Mark::Invalid);
                         cm
                     }),
@@ -489,13 +485,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
     #[inline]
     pub(crate) fn layout(&self) -> Layout {
-        if self.is_finalizable() {
-            // SAFETY: self is finalizable
-            unsafe { self.vtable.trace_finalize.layout() }
-        } else {
-            // SAFETY: self is not finalizable
-            unsafe { self.vtable.trace.layout() }
-        }
+        self.vtable.layout()
     }
 
     #[inline]
@@ -526,8 +516,8 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
     }
 }
 
-impl<T: ?Sized + Trace + Finalize + 'static> Finalize for CcOnHeap<T> {
-    #[inline(always)]
+impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
+    #[inline]
     fn finalize(&mut self) {
         self.elem.finalize();
     }
@@ -541,6 +531,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
         if (*ptr.as_ref().counter_marker()).is_in_possible_cycles() {
             // ptr is in the list, remove it
             let _ = POSSIBLE_CYCLES.try_with(|pc| {
+
                 let mut list = pc.borrow_mut();
                 // Confirm is_in_possible_cycles() in debug builds
                 debug_assert!(list.contains(ptr));
@@ -599,18 +590,8 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         debug_assert!(ptr.as_ref().is_valid());
 
-        let is_finalizable = ptr.as_ref().is_finalizable();
-
-        if is_finalizable {
-            let vtable = ptr.as_ref().vtable.trace_finalize; // SAFETY: ptr.as_ref() is finalizable
-            let mut traceable: NonNull<dyn TraceFinalize> =
-                NonNull::from_raw_parts(ptr.cast(), vtable);
-            traceable.as_mut().trace(ctx);
-        } else {
-            let vtable = ptr.as_ref().vtable.trace; // SAFETY: ptr.as_ref() is not finalizable
-            let mut traceable: NonNull<dyn Trace> = NonNull::from_raw_parts(ptr.cast(), vtable);
-            traceable.as_mut().trace(ctx);
-        }
+        let vtable = ptr.as_ref().vtable;
+        NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_ref().trace(ctx);
     }
 
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
@@ -622,10 +603,8 @@ impl CcOnHeap<()> {
             return false;
         }
 
-        // SAFETY: we've just checked ptr.as_ref() is finalizable
-        let vtable = ptr.as_ref().vtable.trace_finalize;
-        let mut traceable: NonNull<dyn TraceFinalize> = NonNull::from_raw_parts(ptr.cast(), vtable);
-        traceable.as_mut().finalize();
+        let vtable = ptr.as_ref().vtable;
+        NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_mut().finalize();
         true
     }
 
@@ -634,18 +613,9 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
         debug_assert!(ptr.as_ref().is_valid());
 
-        // SAFETY: we require that self is valid, so self.get_vtable() always returns Some(_)
-        let is_finalizable = ptr.as_ref().is_finalizable();
-
-        if is_finalizable {
-            let vtable = ptr.as_ref().vtable.trace_finalize; // SAFETY: ptr.as_ref() is finalizable
-            let traceable: NonNull<dyn TraceFinalize> = NonNull::from_raw_parts(ptr.cast(), vtable);
-            drop_in_place(traceable.as_ptr());
-        } else {
-            let vtable = ptr.as_ref().vtable.trace; // SAFETY: ptr.as_ref() is not finalizable
-            let traceable: NonNull<dyn Trace> = NonNull::from_raw_parts(ptr.cast(), vtable);
-            drop_in_place(traceable.as_ptr());
-        }
+        let vtable = ptr.as_ref().vtable;
+        let traceable: NonNull<dyn Trace> = NonNull::from_raw_parts(ptr.cast(), vtable);
+        drop_in_place(traceable.as_ptr());
     }
 
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
@@ -815,34 +785,5 @@ impl CcOnHeap<()> {
                 }
             },
         }
-    }
-}
-
-trait TraceFinalize: Trace + Finalize {}
-
-impl<T: ?Sized + Trace + Finalize> TraceFinalize for T {}
-
-// Specialization trait used to detect Finalize values
-trait FinalizeSpecialization<T> {
-    fn get_vtable(ptr: NonNull<T>) -> (Vtable, bool);
-}
-
-impl<T: Trace + 'static> FinalizeSpecialization<T> for T {
-    #[inline(always)]
-    default fn get_vtable(ptr: NonNull<T>) -> (Vtable, bool) {
-        let vtable = Vtable {
-            trace: metadata(ptr.as_ptr() as *mut dyn Trace),
-        };
-        (vtable, false)
-    }
-}
-
-impl<T: Trace + Finalize + 'static> FinalizeSpecialization<T> for T {
-    #[inline(always)]
-    fn get_vtable(ptr: NonNull<T>) -> (Vtable, bool) {
-        let vtable = Vtable {
-            trace_finalize: metadata(ptr.as_ptr() as *mut dyn TraceFinalize),
-        };
-        (vtable, true)
     }
 }

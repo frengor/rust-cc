@@ -28,16 +28,25 @@ fn test_complex() {
         }
     }
 
+    impl Finalize for A {
+    }
+
     unsafe impl Trace for B {
         fn trace(&self, ctx: &mut Context<'_>) {
             self.c.trace(ctx);
         }
     }
 
+    impl Finalize for B {
+    }
+
     unsafe impl Trace for D {
         fn trace(&self, ctx: &mut Context<'_>) {
             self.c.trace(ctx);
         }
+    }
+
+    impl Finalize for D {
     }
 
     unsafe impl Trace for C {
@@ -47,6 +56,9 @@ fn test_complex() {
                 cc.trace(ctx);
             }
         }
+    }
+
+    impl Finalize for C {
     }
 
     let a = Cc::<A>::new_cyclic(|a| A {

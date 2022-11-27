@@ -17,6 +17,9 @@ unsafe impl Trace for Circular {
     }
 }
 
+impl Finalize for Circular {
+}
+
 #[test]
 fn test_simple() {
     reset_state();
@@ -232,6 +235,8 @@ fn test_cyclic() {
             self.cc.trace(ctx);
         }
     }
+
+    impl Finalize for Circular {}
 
     let cc = Cc::<Circular>::new_cyclic(|cc| {
         assert!(!cc.is_valid_for_test());
