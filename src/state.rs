@@ -2,7 +2,7 @@ use std::alloc::Layout;
 use std::cell::{BorrowMutError, RefCell};
 use std::ops::DerefMut;
 use std::thread::AccessError;
-use crate::utils::enum_error_impl;
+use thiserror::Error;
 
 thread_local! {
     pub(crate) static STATE: RefCell<State> = RefCell::new(State::default());
@@ -18,7 +18,13 @@ pub(crate) fn try_state<R>(f: impl FnOnce(&mut State) -> R) -> Result<R, StateAc
     STATE.try_with(|state| Ok(f(state.try_borrow_mut()?.deref_mut())))?
 }
 
-enum_error_impl!(StateAccessError, AccessError, BorrowMutError);
+#[derive(Error, Debug)]
+pub enum StateAccessError {
+    #[error(transparent)]
+    AccessError(#[from] AccessError),
+    #[error(transparent)]
+    BorrowMutError(#[from] BorrowMutError),
+}
 
 #[derive(Default)]
 pub(crate) struct State {

@@ -1,8 +1,8 @@
 use std::cell::{BorrowMutError, RefCell};
 use std::ops::DerefMut;
 use std::thread::AccessError;
+use thiserror::Error;
 
-use crate::utils::enum_error_impl;
 use crate::state::State;
 
 thread_local! {
@@ -16,7 +16,13 @@ where
     CONFIG.try_with(|config| Ok(f(config.try_borrow_mut()?.deref_mut())))?
 }
 
-enum_error_impl!(ConfigAccessError, AccessError, BorrowMutError);
+#[derive(Error, Debug)]
+pub enum ConfigAccessError {
+    #[error(transparent)]
+    AccessError(#[from] AccessError),
+    #[error(transparent)]
+    BorrowMutError(#[from] BorrowMutError),
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
