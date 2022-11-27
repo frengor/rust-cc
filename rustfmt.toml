@@ -1,0 +1,6 @@
+version = "Two"
+
+match_block_trailing_comma = true
+group_imports = "StdExternalCrate"
+max_width = 100
+chain_width = 100

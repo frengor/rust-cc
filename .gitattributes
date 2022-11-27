@@ -1,0 +1,9 @@
+# Auto detect text files and perform normalization
+* text=auto
+
+*.rs text diff=rust
+*.md text diff=markdown
+*.toml text diff=toml
+LICENSE text
+.gitignore text
+.gitattributes text
