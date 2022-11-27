@@ -118,6 +118,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
     ///
     /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
     /// [`is_unique`]: fn@Cc::is_unique
+    /// [`is_valid`]: fn@Cc::is_valid
     #[inline]
     #[track_caller]
     pub unsafe fn assume_init(self) -> Cc<T> {
@@ -149,6 +150,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
     /// [`Cc<T>`]: struct@Cc
     /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
     /// [`is_unique`]: fn@Cc::is_unique
+    /// [`is_valid`]: fn@Cc::is_valid
     #[inline]
     #[track_caller]
     pub fn init(mut self, value: T) -> Cc<T> {
@@ -195,7 +197,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 
     #[inline]
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         self.inner().is_valid()
     }
 
