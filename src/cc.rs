@@ -1,10 +1,13 @@
 use std::alloc::Layout;
 use std::cell::UnsafeCell;
-use std::marker::{PhantomData, Unsize};
+use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
-use std::ops::{CoerceUnsized, Deref};
+use std::ops::Deref;
 use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, metadata, DynMetadata, NonNull};
 use std::rc::Rc;
+
+#[cfg(feature = "nightly")]
+use std::{marker::Unsize, ops::CoerceUnsized};
 
 use crate::counter_marker::{CounterMarker, Mark, OverflowError};
 use crate::state::{replace_state_field, state};
@@ -18,6 +21,7 @@ pub struct Cc<T: ?Sized + Trace + 'static> {
     _phantom: PhantomData<Rc<T>>, // Make Cc !Send and !Sync
 }
 
+#[cfg(feature = "nightly")]
 impl<T, U> CoerceUnsized<Cc<U>> for Cc<T>
 where
     T: ?Sized + Trace + Unsize<U> + 'static,
@@ -360,8 +364,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {
-}
+impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
 
 #[repr(C)]
 pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
@@ -527,7 +530,6 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
         if (*ptr.as_ref().counter_marker()).is_in_possible_cycles() {
             // ptr is in the list, remove it
             let _ = POSSIBLE_CYCLES.try_with(|pc| {
-
                 let mut list = pc.borrow_mut();
                 // Confirm is_in_possible_cycles() in debug builds
                 debug_assert!(list.contains(ptr));
