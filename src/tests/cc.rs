@@ -1,4 +1,4 @@
-use std::mem::{ManuallyDrop, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -138,8 +138,11 @@ fn test_cc() {
     checker2.assert_dropped();
 }
 
+#[cfg(feature = "nightly")]
 #[test]
 fn test_trait_object() {
+    use std::mem::ManuallyDrop;
+
     reset_state();
 
     thread_local! {
