@@ -4,6 +4,7 @@ use std::marker::{PhantomData, Unsize};
 use std::mem::{self, MaybeUninit};
 use std::ops::{CoerceUnsized, Deref};
 use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, metadata, DynMetadata, NonNull};
+use std::rc::Rc;
 
 use crate::counter_marker::{CounterMarker, Mark, OverflowError};
 use crate::state::{replace_state_field, state};
@@ -14,13 +15,8 @@ use crate::{trigger_collection, try_state, POSSIBLE_CYCLES};
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
     inner: NonNull<CcOnHeap<T>>,
-    _phantom: PhantomData<CcOnHeap<T>>,
+    _phantom: PhantomData<Rc<T>>, // Make Cc !Send and !Sync
 }
-
-// These are not really necessary, since CcOnHeap is already !Send and !Sync,
-// leave just for documentation
-impl<T: ?Sized + Trace + 'static> !Send for Cc<T> {}
-impl<T: ?Sized + Trace + 'static> !Sync for Cc<T> {}
 
 impl<T, U> CoerceUnsized<Cc<U>> for Cc<T>
 where
@@ -374,12 +370,10 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     vtable: DynMetadata<dyn Trace>,
 
     counter_marker: UnsafeCell<CounterMarker>,
+    _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
 
     elem: T,
 }
-
-impl<T: ?Sized + Trace + 'static> !Send for CcOnHeap<T> {}
-impl<T: ?Sized + Trace + 'static> !Sync for CcOnHeap<T> {}
 
 impl<T: Trace + 'static> CcOnHeap<T> {
     #[inline(always)]
@@ -395,6 +389,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     prev: UnsafeCell::new(None),
                     vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
                     counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(true)),
+                    _phantom: PhantomData,
                     elem: t,
                 },
             );
@@ -426,6 +421,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                         cm.mark(Mark::Invalid);
                         cm
                     }),
+                    _phantom: PhantomData,
                     elem: MaybeUninit::uninit(),
                 },
             );

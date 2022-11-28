@@ -9,11 +9,11 @@ use std::ops::Deref;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
 };
+use std::sync::Arc;
 
 use crate::List;
 
@@ -40,10 +40,8 @@ pub unsafe trait Trace: Finalize {
 /// Struct for tracing context.
 pub struct Context<'a> {
     inner: ContextInner<'a>,
+    _phantom: PhantomData<Rc<()>>, // Make Context !Send and !Sync
 }
-
-impl<'a> !Send for Context<'a> {}
-impl<'a> !Sync for Context<'a> {}
 
 pub(crate) enum ContextInner<'a> {
     Counting {
@@ -61,7 +59,10 @@ impl<'b> Context<'b> {
     #[inline]
     #[must_use]
     pub(crate) const fn new(ctxi: ContextInner) -> Context {
-        Context { inner: ctxi }
+        Context {
+            inner: ctxi,
+            _phantom: PhantomData,
+        }
     }
 
     #[inline]
@@ -159,8 +160,7 @@ unsafe impl<T> Trace for PhantomData<T> {
     fn trace(&self, _: &mut Context<'_>) {}
 }
 
-impl<T> Finalize for PhantomData<T> {
-}
+impl<T> Finalize for PhantomData<T> {}
 
 macro_rules! deref_trace {
     ($generic:ident; $this:ty; $($bound:tt)*) => {
@@ -216,8 +216,7 @@ unsafe impl<T: Trace + 'static> Trace for Rc<T> {
     }
 }
 
-impl<T: Finalize + 'static> Finalize for Rc<T> {
-}
+impl<T: Finalize + 'static> Finalize for Rc<T> {}
 
 unsafe impl<T: Trace + 'static> Trace for Arc<T> {
     #[inline]
@@ -226,8 +225,7 @@ unsafe impl<T: Trace + 'static> Trace for Arc<T> {
     }
 }
 
-impl<T: Finalize + 'static> Finalize for Arc<T> {
-}
+impl<T: Finalize + 'static> Finalize for Arc<T> {}
 
 unsafe impl<T: Trace + 'static> Trace for Option<T> {
     #[inline]
