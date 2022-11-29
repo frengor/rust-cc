@@ -380,8 +380,6 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
 
     #[cfg(not(feature = "nightly"))]
     fat_ptr: NonNull<dyn Trace>,
-    #[cfg(not(feature = "nightly"))]
-    layout: Layout,
 
     counter_marker: UnsafeCell<CounterMarker>,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
@@ -405,8 +403,6 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn Trace),
-                    #[cfg(not(feature = "nightly"))]
-                    layout,
                     counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(true)),
                     _phantom: PhantomData,
                     elem: t,
@@ -440,8 +436,6 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     fat_ptr: NonNull::new_unchecked(
                         ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace
                     ),
-                    #[cfg(not(feature = "nightly"))]
-                    layout,
                     counter_marker: UnsafeCell::new({
                         let mut cm = CounterMarker::new_with_counter_to_one(true);
                         cm.mark(Mark::Invalid);
@@ -513,8 +507,8 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
         }
 
         #[cfg(not(feature = "nightly"))]
-        {
-            self.layout
+        unsafe {
+            Layout::for_value(self.fat_ptr.as_ref())
         }
     }
 
