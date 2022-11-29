@@ -3,11 +3,15 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ops::Deref;
-use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, metadata, DynMetadata, NonNull};
+use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, NonNull};
 use std::rc::Rc;
 
 #[cfg(feature = "nightly")]
-use std::{marker::Unsize, ops::CoerceUnsized};
+use std::{
+    marker::Unsize,
+    ops::CoerceUnsized,
+    ptr::{metadata, DynMetadata},
+};
 
 use crate::counter_marker::{CounterMarker, Mark, OverflowError};
 use crate::state::{replace_state_field, state};
@@ -370,7 +374,14 @@ impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
 pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     next: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
     prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
+
+    #[cfg(feature = "nightly")]
     vtable: DynMetadata<dyn Trace>,
+
+    #[cfg(not(feature = "nightly"))]
+    fat_ptr: NonNull<dyn Trace>,
+    #[cfg(not(feature = "nightly"))]
+    layout: Layout,
 
     counter_marker: UnsafeCell<CounterMarker>,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
@@ -390,7 +401,12 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                 CcOnHeap {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
+                    #[cfg(feature = "nightly")]
                     vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
+                    #[cfg(not(feature = "nightly"))]
+                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn Trace),
+                    #[cfg(not(feature = "nightly"))]
+                    layout,
                     counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(true)),
                     _phantom: PhantomData,
                     elem: t,
@@ -418,7 +434,14 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                 CcOnHeap {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
+                    #[cfg(feature = "nightly")]
                     vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace),
+                    #[cfg(not(feature = "nightly"))]
+                    fat_ptr: NonNull::new_unchecked(
+                        ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace
+                    ),
+                    #[cfg(not(feature = "nightly"))]
+                    layout,
                     counter_marker: UnsafeCell::new({
                         let mut cm = CounterMarker::new_with_counter_to_one(true);
                         cm.mark(Mark::Invalid);
@@ -484,7 +507,15 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
     #[inline]
     pub(crate) fn layout(&self) -> Layout {
-        self.vtable.layout()
+        #[cfg(feature = "nightly")]
+        {
+            self.vtable.layout()
+        }
+
+        #[cfg(not(feature = "nightly"))]
+        {
+            self.layout
+        }
     }
 
     #[inline]
@@ -588,8 +619,16 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         debug_assert!(ptr.as_ref().is_valid());
 
-        let vtable = ptr.as_ref().vtable;
-        NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_ref().trace(ctx);
+        #[cfg(feature = "nightly")]
+        {
+            let vtable = ptr.as_ref().vtable;
+            NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_ref().trace(ctx);
+        }
+
+        #[cfg(not(feature = "nightly"))]
+        {
+            ptr.as_ref().fat_ptr.as_ref().trace(ctx);
+        }
     }
 
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
@@ -601,8 +640,17 @@ impl CcOnHeap<()> {
             return false;
         }
 
-        let vtable = ptr.as_ref().vtable;
-        NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_mut().finalize();
+        #[cfg(feature = "nightly")]
+        {
+            let vtable = ptr.as_ref().vtable;
+            NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_mut().finalize();
+        }
+
+        #[cfg(not(feature = "nightly"))]
+        {
+            let mut ptr = ptr; // Redeclare as mut here to avoid "useless mut" warning on when nightly features are enabled
+            ptr.as_mut().fat_ptr.as_mut().finalize();
+        }
         true
     }
 
@@ -611,8 +659,19 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
         debug_assert!(ptr.as_ref().is_valid());
 
-        let vtable = ptr.as_ref().vtable;
-        let traceable: NonNull<dyn Trace> = NonNull::from_raw_parts(ptr.cast(), vtable);
+        let traceable: NonNull<dyn Trace>;
+
+        #[cfg(feature = "nightly")]
+        {
+            let vtable = ptr.as_ref().vtable;
+            traceable = NonNull::from_raw_parts(ptr.cast(), vtable);
+        }
+
+        #[cfg(not(feature = "nightly"))]
+        {
+            traceable = ptr.as_ref().fat_ptr;
+        }
+
         drop_in_place(traceable.as_ptr());
     }
 

@@ -1,18 +1,15 @@
-#![feature(bench_black_box)]
-
 use std::cell::RefCell;
-use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, black_box};
 use rust_cc::*;
 
 fn benchmark(c: &mut Criterion) {
     c.bench_function("finalized", |b| {
         b.iter(|| finalized(black_box(1), black_box(1)))
     });
-    c.bench_function("not_finalized", |b| {
+    /*c.bench_function("not_finalized", |b| {
         b.iter(|| not_finalized(black_box(2), black_box(2)))
-    });
+    });*/
 }
 
 criterion_group! {
@@ -143,7 +140,8 @@ fn finalized(d_: u64, e_: i64) {
     collect_cycles();
 }
 
-#[inline(never)]
+// Objects are always finalized now
+/*#[inline(never)]
 fn not_finalized(d_: u64, e_: i64) {
     define_test!(fn build, A, B, C, D, E);
 
@@ -156,4 +154,4 @@ fn not_finalized(d_: u64, e_: i64) {
         collect_cycles();
     }
     collect_cycles();
-}
+}*/

@@ -1,5 +1,4 @@
-#![feature(ptr_metadata)]
-#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized))]
+#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata))]
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
