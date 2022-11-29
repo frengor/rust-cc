@@ -220,7 +220,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     /// Note: don't access self.inner_mut().elem if CcOnHeap is not valid!
     #[inline(always)]
-    fn _inner_mut(&mut self) -> &mut CcOnHeap<T> {
+    fn inner_mut(&mut self) -> &mut CcOnHeap<T> {
         // If Cc is alive then we can always access the underlying CcOnHeap
         unsafe { self.inner.as_mut() }
     }
@@ -325,10 +325,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             let to_drop = if self.inner().is_finalizable() {
                 let _finalizing_guard = replace_state_field!(finalizing, true);
-                // SAFETY: we checked that inner is valid
-                unsafe {
-                    CcOnHeap::finalize_inner(self.inner.cast());
-                }
+                self.inner_mut().elem.finalize();
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
             } else {
@@ -362,7 +359,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
         // SAFETY: we have just checked that self is valid
         unsafe {
             if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().trace(ctx);
+                self.inner().elem.trace(ctx);
             }
         }
     }
@@ -532,7 +529,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
-        // This should never be called on an invalid instance, since <Cc as Trace>::trace prevents that.
+        // This should never be called on an invalid instance.
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
@@ -541,8 +538,12 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
 }
 
 impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
-    #[inline]
+    #[inline(always)]
     fn finalize(&mut self) {
+        // This should never be called on an invalid instance.
+        // The debug_assert should catch any bug related to this
+        debug_assert!(self.is_valid());
+
         self.elem.finalize();
     }
 }
