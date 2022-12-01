@@ -5,7 +5,6 @@ use std::num::{
     NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU128,
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
-use std::ops::Deref;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -13,7 +12,6 @@ use std::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
 };
-use std::sync::Arc;
 
 use crate::List;
 
