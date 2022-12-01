@@ -28,8 +28,7 @@ fn test_complex() {
         }
     }
 
-    impl Finalize for A {
-    }
+    impl Finalize for A {}
 
     unsafe impl Trace for B {
         fn trace(&self, ctx: &mut Context<'_>) {
@@ -37,8 +36,7 @@ fn test_complex() {
         }
     }
 
-    impl Finalize for B {
-    }
+    impl Finalize for B {}
 
     unsafe impl Trace for D {
         fn trace(&self, ctx: &mut Context<'_>) {
@@ -46,8 +44,7 @@ fn test_complex() {
         }
     }
 
-    impl Finalize for D {
-    }
+    impl Finalize for D {}
 
     unsafe impl Trace for C {
         fn trace(&self, ctx: &mut Context<'_>) {
@@ -58,8 +55,7 @@ fn test_complex() {
         }
     }
 
-    impl Finalize for C {
-    }
+    impl Finalize for C {}
 
     let a = Cc::<A>::new_cyclic(|a| A {
         b: Cc::<B>::new_cyclic(|b| B {
@@ -341,4 +337,34 @@ fn test_finalize_drop() {
     assert!(FINALIZEDB.with(|cell| cell.get()));
     assert!(DROPPED.with(|cell| cell.get()));
     assert!(DROPPEDB.with(|cell| cell.get()));
+}
+
+// Code which created UB when Rc had Trace implemented
+// Commented to avoid compilation errors since Rc doesn't implement Trace anymore
+/*#[test]
+fn rc_test() {
+    let mut rc = None;
+
+    {
+        let _cc = Cc::<Box<dyn Trace>>::new_cyclic(|cc| {
+            let rc_ = Rc::new(Cc::new(cc.clone()));
+            rc = Some(rc_.clone());
+            Box::new(rc_)
+        });
+    }
+
+    collect_cycles();
+
+    assert!(rc.expect("rc not set").is_valid());
+}*/
+
+#[test]
+fn box_test() {
+    {
+        let _cc = Cc::<Box<dyn Trace>>::new_cyclic(|cc| {
+            Box::new(Cc::new(cc.clone())) as Box<dyn Trace>
+        });
+    }
+
+    collect_cycles();
 }

@@ -209,24 +209,6 @@ deref_traces_sized! {
     AssertUnwindSafe,
 }
 
-unsafe impl<T: Trace + 'static> Trace for Rc<T> {
-    #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.deref().trace(ctx);
-    }
-}
-
-impl<T: Finalize + 'static> Finalize for Rc<T> {}
-
-unsafe impl<T: Trace + 'static> Trace for Arc<T> {
-    #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.deref().trace(ctx);
-    }
-}
-
-impl<T: Finalize + 'static> Finalize for Arc<T> {}
-
 unsafe impl<T: Trace + 'static> Trace for Option<T> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
