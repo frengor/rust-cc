@@ -20,17 +20,43 @@ pub trait Finalize {
     fn finalize(&mut self) {}
 }
 
-/// Trace fields of structs.
+/// Trait to trace cycle-collectable objects.
+///
+/// Implementors should only call the [`trace`] method of every [`Cc`] owned **only** by the implementing struct.
+///
+/// This trait is already implemented for common types from the standard lib.
+///
+/// Remember that creating, cloning, or accessing the contents of a [`Cc`] from inside of [`trace`] will produce a panic,
+/// since it is run during cycle collection.
 ///
 /// # Safety
-/// TODO
+/// This trait is unsafe *to implement* because it's not possible to check the following invariants:
+///   * The [`trace`] function *should* be called **only once** on every [`Cc`] **owned only** by the implementing struct.
 ///
-/// For the moment, see `rgc::trace::Trace` for safety. The same should apply here (where applicable).
-/// Note however that, for `rcc`, a struct which implements [`Drop`] and [`Trace`] is likely to produce UB when traced.
-/// The [`Drop`] implementation should **not** mutate the struct in any way and, most importantly, not move out any [`Cc<T>`] from inside.
-/// Prefer the [`Finalize`] trait to [`Drop`].
+///     For example, a [`Cc`] inside a [`Box`] (so a `Box<Cc>`) is owned *only* by the implementing struct.
+///     However, a [`Cc`] inside an [`Rc`] (so a `Rc<Cc>`) *isn't* owned *only* by the implementing struct, so it mustn't be traced.
 ///
-/// [`Cc<T>`]: struct@crate::cc::Cc
+///     In general, mixing other shared-ownership smart pointers with [`Cc`]s is not possible and will (almost surely) lead to UB.
+///   * If a [`Cc`] is not traced in *any* execution, then it must be skipped in *every* execution. Skipping [`trace`] calls *may*
+///     leak memory, but it's better than UB.
+///
+///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory),
+///     but it's safe.
+///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
+///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move any [`Cc`].
+///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
+///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
+///     since it always emits an empty [`Drop`] implementation for the implementing struct.
+///
+/// [interior mutability]: https://doc.rust-lang.org/reference/interior-mutability.html
+/// [`self`]: https://doc.rust-lang.org/std/keyword.self.html
+/// [`trace`]: crate::Trace::trace
+/// [`Finalize`]: crate::Finalize
+/// [`Cc`]: crate::Cc
+/// [`Drop`]: std::ops::Drop
+/// [`Rc`]: std::rc::Rc
+/// [`Box`]: std::boxed::Box
+/// [`drop`]: std::ops::Drop::drop
 pub unsafe trait Trace: Finalize {
     fn trace(&self, ctx: &mut Context<'_>);
 }
