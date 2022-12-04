@@ -612,62 +612,37 @@ impl CcOnHeap<()> {
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        debug_assert!(ptr.as_ref().is_valid());
-
-        #[cfg(feature = "nightly")]
-        {
-            let vtable = ptr.as_ref().vtable;
-            NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_ref().trace(ctx);
-        }
-
-        #[cfg(not(feature = "nightly"))]
-        {
-            ptr.as_ref().fat_ptr.as_ref().trace(ctx);
-        }
+        CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
     }
 
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
-        debug_assert!(ptr.as_ref().is_valid());
-
-        if !ptr.as_ref().is_finalizable() {
-            return false;
-        }
-
-        #[cfg(feature = "nightly")]
-        {
-            let vtable = ptr.as_ref().vtable;
-            NonNull::<dyn Trace>::from_raw_parts(ptr.cast(), vtable).as_mut().finalize();
-        }
-
-        #[cfg(not(feature = "nightly"))]
-        {
-            let mut ptr = ptr; // Redeclare as mut here to avoid "useless mut" warning on when nightly features are enabled
-            ptr.as_mut().fat_ptr.as_mut().finalize();
-        }
+        CcOnHeap::get_traceable(ptr).as_mut().finalize();
         true
     }
 
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        debug_assert!(ptr.as_ref().is_valid());
+        drop_in_place(CcOnHeap::get_traceable(ptr).as_ptr());
+    }
 
-        let traceable: NonNull<dyn Trace>;
+    /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
+    #[inline]
+    unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn Trace> {
+        debug_assert!(ptr.as_ref().is_valid()); // Just to be sure
 
         #[cfg(feature = "nightly")]
         {
             let vtable = ptr.as_ref().vtable;
-            traceable = NonNull::from_raw_parts(ptr.cast(), vtable);
+            NonNull::from_raw_parts(ptr.cast(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
         {
-            traceable = ptr.as_ref().fat_ptr;
+            ptr.as_ref().fat_ptr
         }
-
-        drop_in_place(traceable.as_ptr());
     }
 
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
