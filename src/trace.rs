@@ -7,7 +7,6 @@ use std::num::{
 };
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
@@ -64,7 +63,7 @@ pub unsafe trait Trace: Finalize {
 /// Struct for tracing context.
 pub struct Context<'a> {
     inner: ContextInner<'a>,
-    _phantom: PhantomData<Rc<()>>, // Make Context !Send and !Sync
+    _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
 }
 
 pub(crate) enum ContextInner<'a> {
