@@ -48,6 +48,114 @@ pub trait Finalize {
 ///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
 ///     since it always emits an empty [`Drop`] implementation for the implementing struct.
 ///
+/// For some erroneous implementation examples of this trait, see [Erroneous implementation examples](#erroneous-implementation-examples) down below.
+///
+/// # Example
+/// ```rust
+///# use rust_cc::*;
+/// struct Example {
+///     an_elem: i32,
+///     cc_elem: Cc<i32>,
+///     optional_elem: Option<Box<i32>>,
+///     optional_cc_elem: Option<Cc<i32>>,
+/// }
+///
+/// unsafe impl Trace for Example {
+///     fn trace(&self, ctx: &mut Context) {
+///         // an_elem is an i32, there's no need to trace it
+///         self.cc_elem.trace(ctx);
+///         // optional_elem doesn't contain a Cc, no need to trace it
+///         self.optional_cc_elem.trace(ctx);
+///     }
+/// }
+///# impl Finalize for Example {}
+/// ```
+///
+/// # Erroneous implementation examples
+/// ```rust,no_run
+///# use std::ops::Deref;
+///# use rust_cc::*;
+/// struct ErroneousExample {
+///     cc_elem: Cc<i32>,
+///     my_struct_elem: MyStruct,
+///     a_cc_struct_elem: Cc<ACcStruct>,
+///     ignored_cc: Cc<u64>,
+/// }
+///
+/// struct MyStruct;
+///
+/// unsafe impl Trace for MyStruct {
+///    fn trace(&self, _ctx: &mut Context) {
+///        // No fields, no trace() methods to call
+///    }
+/// }
+///# impl Finalize for MyStruct {}
+///
+/// struct ACcStruct {
+///    cc: Cc<i32>,
+/// }
+///
+/// unsafe impl Trace for ACcStruct {
+///    fn trace(&self, ctx: &mut Context) {
+///        self.cc.trace(ctx);
+///    }
+/// }
+///# impl Finalize for ACcStruct {}
+///
+/// unsafe impl Trace for ErroneousExample {
+///     fn trace(&self, ctx: &mut Context) {
+///         self.cc_elem.trace(ctx); // Correct call
+///         self.my_struct_elem.trace(ctx); // Useless since MyStruct is a ZST, but still fine
+///
+///         let new_cc = Cc::new(10); // This will panic to avoid undefined behavior! ⚠️
+///         new_cc.trace(ctx); // If the previous line didn't panic, this call would have produced undefined behavior
+///
+///         self.a_cc_struct_elem.trace(ctx); // Correct call
+///         self.a_cc_struct_elem.trace(ctx); // Double tracing of the same Cc, undefined behavior! ⚠️
+///
+///         // It's safe to **always** ignore a field, although this may cause memory leaks
+///         // self.ignored_cc.trace(ctx);
+///     }
+/// }
+///# impl Finalize for ErroneousExample {}
+/// ```
+///
+/// ```rust,no_run
+///# use std::cell::Cell;
+///# use rust_cc::*;
+/// struct Foo {
+///     cc: Cell<Option<Cc<u64>>>,
+/// }
+///
+/// unsafe impl Trace for Foo {
+///     fn trace(&self, ctx: &mut Context) {
+///         let _ = self.cc.take(); // Modifying self, undefined behavior! ⚠️
+///     }
+/// }
+///# impl Finalize for Foo {}
+/// ```
+///
+/// ```rust,no_run
+///# use std::cell::RefCell;
+///# use rust_cc::*;
+/// struct Foo {
+///     cc: RefCell<Option<Cc<u64>>>,
+/// }
+///
+/// unsafe impl Trace for Foo {
+///     fn trace(&self, ctx: &mut Context) {
+///         self.cc.trace(ctx); // Correct trace implementation, but...
+///     }
+/// }
+///# impl Finalize for Foo {}
+///
+/// impl Drop for Foo {
+///     fn drop(&mut self) {
+///         let _ = self.cc.take(); // A Cc has been moved inside Drop, undefined behavior! ⚠️
+///     }
+/// }
+/// ```
+///
 /// [interior mutability]: https://doc.rust-lang.org/reference/interior-mutability.html
 /// [`self`]: https://doc.rust-lang.org/std/keyword.self.html
 /// [`trace`]: crate::Trace::trace
