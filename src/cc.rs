@@ -652,9 +652,9 @@ impl CcOnHeap<()> {
         let counter_marker = ptr.as_ref().counter_marker();
         match ctx.inner() {
             ContextInner::Counting { root_list, .. } => {
-                // ptr is into POSSIBLE_CYCLES list
+                // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
+                // POSSIBLE_CYCLES by rust_cc::collect() (see lib.rs) before calling this function
 
-                remove_from_list(ptr); // Remove ptr from POSSIBLE_CYCLES list
                 root_list.add(ptr);
 
                 // Reset trace_counter
