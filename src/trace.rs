@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, MaybeUninit};
@@ -90,7 +91,7 @@ impl<'b> Context<'b> {
 
     #[inline]
     pub(crate) fn inner<'a>(&'a mut self) -> &'a mut ContextInner<'b>
-    where
+        where
         'b: 'a,
     {
         &mut self.inner
@@ -230,6 +231,24 @@ deref_traces! {
 
 deref_traces_sized! {
     AssertUnwindSafe,
+}
+
+unsafe impl<T: ?Sized + Trace + 'static> Trace for RefCell<T> {
+    #[inline]
+    fn trace(&self, ctx: &mut Context<'_>) {
+        if let Ok(borrow) = self.try_borrow() {
+            borrow.trace(ctx);
+        }
+    }
+}
+
+impl<T: ?Sized + Finalize + 'static> Finalize for RefCell<T> {
+    #[inline]
+    fn finalize(&mut self) {
+        if let Ok(mut borrow) = self.try_borrow_mut() {
+            borrow.finalize();
+        }
+    }
 }
 
 unsafe impl<T: Trace + 'static> Trace for Option<T> {
