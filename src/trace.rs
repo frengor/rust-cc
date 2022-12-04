@@ -37,11 +37,11 @@ pub trait Finalize {
 ///     However, a [`Cc`] inside an [`Rc`] (so a `Rc<Cc>`) *isn't* owned *only* by the implementing struct, so it mustn't be traced.
 ///
 ///     In general, mixing other shared-ownership smart pointers with [`Cc`]s is not possible and will (almost surely) lead to UB.
-///   * If a [`Cc`] is not traced in *any* execution, then it must be skipped in *every* execution. Skipping [`trace`] calls *may*
-///     leak memory, but it's better than UB.
+///   * If a [`Cc`] is not traced in *any* execution, then it must be skipped in *any other* execution *except* if any user function other
+///     than [`trace`] is called in between. So, for example, two [`trace`] calls with a [`finalize`] call in between may trace different [`Cc`]s.
+///     Note that skipping [`trace`] calls *may* leak memory, but it's better than UB.
 ///
-///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory),
-///     but it's safe.
+///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory), but it's safe.
 ///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
 ///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move any [`Cc`].
 ///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
@@ -160,6 +160,7 @@ pub trait Finalize {
 /// [`self`]: https://doc.rust-lang.org/std/keyword.self.html
 /// [`trace`]: crate::Trace::trace
 /// [`Finalize`]: crate::Finalize
+/// [`finalize`]: crate::Finalize::finalize
 /// [`Cc`]: crate::Cc
 /// [`Drop`]: std::ops::Drop
 /// [`Rc`]: std::rc::Rc
