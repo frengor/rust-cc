@@ -795,22 +795,27 @@ impl CcOnHeap<()> {
                         return false;
                     }
 
-                    // Not already marked
-                    // This avoids tracing this node again
-                    (*counter_marker).mark(Mark::TraceRoots);
-
                     if (*counter_marker).tracing_counter() < (*counter_marker).counter() {
                         // If ptr is a root then stop tracing, since it will be handled
                         // at the next iteration of start_tracing
+
+                        // Avoids tracing this CcOnHeap again
+                        (*counter_marker).mark(Mark::TraceRoots);
                         return false;
                     }
-                    // Else remove the element from non_root_list
+
+                    // Else remove the element from non_root_list.
+                    // Marking NonMarked since ptr will be removed from the list. Also, marking NonMarked
+                    // will avoid tracing this CcOnHeap again, thanks to the 2 nested ifs above: at the
+                    // next iteration this CcOnHeap won't be marked neither TraceRoots nor TraceCounting,
+                    // so this function will return false and no tracing will happen
+                    (*counter_marker).mark(Mark::NonMarked);
                     non_root_list.remove(ptr);
 
                     // Continue root tracing
                     return true;
                 }
-                // Don't continue trace in every other case
+                // Don't continue trace in any other case
                 false
             },
             ContextInner::DropTracing => {
