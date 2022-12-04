@@ -674,6 +674,7 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         debug_assert!(ptr.as_ref().is_valid());
 
+        let counter_marker = ptr.as_ref().counter_marker();
         match ctx.inner() {
             ContextInner::Counting { root_list, .. } => {
                 // ptr is into POSSIBLE_CYCLES list
@@ -682,28 +683,28 @@ impl CcOnHeap<()> {
                 root_list.add(ptr);
 
                 // Reset trace_counter
-                (*ptr.as_ref().counter_marker()).reset_tracing_counter();
+                (*counter_marker).reset_tracing_counter();
 
                 // Element is surely not already marked, marking
-                (*ptr.as_ref().counter_marker()).mark(Mark::TraceCounting);
+                (*counter_marker).mark(Mark::TraceCounting);
             },
             ContextInner::RootTracing { .. } => {
                 // ptr is into root_list
 
-                // Element is surely not already marked, marking
-                (*ptr.as_ref().counter_marker()).mark(Mark::TraceRoots);
+                // Element is not already marked, marking
+                (*counter_marker).mark(Mark::TraceRoots);
             },
             ContextInner::DropTracing => {
-                if (*ptr.as_ref().counter_marker()).is_marked_trace_dropping() {
+                if (*counter_marker).is_marked_trace_dropping() {
                     return;
                 }
-                (*ptr.as_ref().counter_marker()).mark(Mark::TraceDropping);
+                (*counter_marker).mark(Mark::TraceDropping);
             },
             ContextInner::DropResurrecting => {
-                if (*ptr.as_ref().counter_marker()).is_marked_trace_resurrecting() {
+                if (*counter_marker).is_marked_trace_resurrecting() {
                     return;
                 }
-                (*ptr.as_ref().counter_marker()).mark(Mark::TraceResurrecting);
+                (*counter_marker).mark(Mark::TraceResurrecting);
             },
         }
 
