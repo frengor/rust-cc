@@ -18,6 +18,7 @@ mod tests;
 mod cc;
 pub mod config;
 mod counter_marker;
+mod graph;
 mod list;
 pub mod state;
 mod trace;
