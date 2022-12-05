@@ -2,13 +2,14 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
+use std::ops::Deref;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
 use crate::config::config;
 use crate::counter_marker::Mark;
 use crate::list::List;
-use crate::state::{replace_state_field, state, State, try_state};
+use crate::state::{replace_state_field, state, try_state, State};
 use crate::trace::ContextInner;
 use crate::utils::*;
 
@@ -24,6 +25,7 @@ pub mod state;
 mod trace;
 mod utils;
 
+use crate::graph::Graph;
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 
@@ -93,10 +95,11 @@ fn collect() {
         if let Ok(Some(ptr)) = ptr {
             let mut root_list = List::new();
             let mut non_root_list = List::new();
+            let mut graph = Graph::new();
 
             // SAFETY: ptr comes from POSSIBLE_CYCLES list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
             unsafe {
-                trace_counting(ptr, &mut root_list, &mut non_root_list);
+                trace_counting(ptr, &mut root_list, &mut non_root_list, &mut graph);
             }
 
             trace_roots(&mut root_list, &mut non_root_list);
@@ -104,7 +107,10 @@ fn collect() {
                 // Reset mark
                 (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
 
-                debug_assert_ne!(ptr.as_ref().get_tracing_counter(), ptr.as_ref().get_counter());
+                debug_assert_ne!(
+                    ptr.as_ref().get_tracing_counter(),
+                    ptr.as_ref().get_counter()
+                );
             });
 
             if !non_root_list.is_empty() {
@@ -188,42 +194,51 @@ unsafe fn trace_counting(
     ptr: NonNull<CcOnHeap<()>>,
     root_list: &mut List,
     non_root_list: &mut List,
+    graph: &mut Graph,
 ) {
-    let mut ctx = Context::new(ContextInner::Counting {
+    let mut ctx_inner = RefCell::new(ContextInner::Counting {
         root_list,
         non_root_list,
+        graph,
     });
+    let mut ctx = Context::new(&mut ctx_inner, None);
     CcOnHeap::start_tracing(ptr, &mut ctx);
+    if let ContextInner::Counting { graph, .. } = ctx.inner().borrow_mut().deref() {
+        println!("{:?}", graph);
+    };
 }
 
 fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
-    let mut ctx = Context::new(ContextInner::RootTracing { non_root_list });
+    let mut ctx_inner = RefCell::new(ContextInner::RootTracing { non_root_list });
+    let ctx = &mut Context::new(&mut ctx_inner, None);
     root_list.for_each(|ptr| {
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
-            CcOnHeap::start_tracing(ptr, &mut ctx);
+            CcOnHeap::start_tracing(ptr, ctx);
         }
     });
 }
 
 fn trace_dropping(non_root_list: &mut List) {
-    let mut ctx = Context::new(ContextInner::DropTracing);
+    let mut ctx_inner = RefCell::new(ContextInner::DropTracing);
+    let ctx = &mut Context::new(&mut ctx_inner, None);
     non_root_list.for_each(|ptr| {
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
-            CcOnHeap::start_tracing(ptr, &mut ctx);
+            CcOnHeap::start_tracing(ptr, ctx);
         }
     });
 }
 
 fn trace_resurrecting(non_root_list: &mut List) -> bool {
+    let mut ctx_inner = RefCell::new(ContextInner::DropResurrecting);
     let mut has_resurrected = false;
-    let mut ctx = Context::new(ContextInner::DropResurrecting);
+    let ctx = &mut Context::new(&mut ctx_inner, None);
     non_root_list.for_each(|ptr| unsafe {
         if ptr.as_ref().get_tracing_counter() != 0 {
             has_resurrected = true;
             // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
-            CcOnHeap::start_tracing(ptr, &mut ctx);
+            CcOnHeap::start_tracing(ptr, ctx);
         }
     });
     has_resurrected

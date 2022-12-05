@@ -1,3 +1,5 @@
+use crate::cc::CcOnHeap;
+use crate::graph::Graph;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::marker::PhantomData;
@@ -8,6 +10,7 @@ use std::num::{
 };
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
 use std::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
@@ -61,7 +64,7 @@ pub trait Finalize {
 /// }
 ///
 /// unsafe impl Trace for Example {
-///     fn trace(&self, ctx: &mut Context) {
+///     fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///         // an_elem is an i32, there's no need to trace it
 ///         self.cc_elem.trace(ctx);
 ///         // optional_elem doesn't contain a Cc, no need to trace it
@@ -85,7 +88,7 @@ pub trait Finalize {
 /// struct MyStruct;
 ///
 /// unsafe impl Trace for MyStruct {
-///    fn trace(&self, _ctx: &mut Context) {
+///    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///        // No fields, no trace() methods to call
 ///    }
 /// }
@@ -96,14 +99,14 @@ pub trait Finalize {
 /// }
 ///
 /// unsafe impl Trace for ACcStruct {
-///    fn trace(&self, ctx: &mut Context) {
+///    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///        self.cc.trace(ctx);
 ///    }
 /// }
 ///# impl Finalize for ACcStruct {}
 ///
 /// unsafe impl Trace for ErroneousExample {
-///     fn trace(&self, ctx: &mut Context) {
+///     fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///         self.cc_elem.trace(ctx); // Correct call
 ///         self.my_struct_elem.trace(ctx); // Useless since MyStruct is a ZST, but still fine
 ///
@@ -128,7 +131,7 @@ pub trait Finalize {
 /// }
 ///
 /// unsafe impl Trace for Foo {
-///     fn trace(&self, ctx: &mut Context) {
+///     fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///         let _ = self.cc.take(); // Modifying self, undefined behavior! ⚠️
 ///     }
 /// }
@@ -143,7 +146,7 @@ pub trait Finalize {
 /// }
 ///
 /// unsafe impl Trace for Foo {
-///     fn trace(&self, ctx: &mut Context) {
+///     fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
 ///         self.cc.trace(ctx); // Correct trace implementation, but...
 ///     }
 /// }
@@ -167,12 +170,13 @@ pub trait Finalize {
 /// [`Box`]: std::boxed::Box
 /// [`drop`]: std::ops::Drop::drop
 pub unsafe trait Trace: Finalize {
-    fn trace(&self, ctx: &mut Context<'_>);
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>);
 }
 
 /// Struct for tracing context.
 pub struct Context<'a> {
-    inner: ContextInner<'a>,
+    inner: &'a RefCell<ContextInner<'a>>,
+    pub(crate) tracer: Option<NonNull<CcOnHeap<()>>>,
     _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
 }
 
@@ -180,6 +184,7 @@ pub(crate) enum ContextInner<'a> {
     Counting {
         root_list: &'a mut List,
         non_root_list: &'a mut List,
+        graph: &'a mut Graph,
     },
     RootTracing {
         non_root_list: &'a mut List,
@@ -191,19 +196,20 @@ pub(crate) enum ContextInner<'a> {
 impl<'b> Context<'b> {
     #[inline]
     #[must_use]
-    pub(crate) const fn new(ctxi: ContextInner) -> Context {
+    pub(crate) fn new(
+        ctxi: &'b RefCell<ContextInner<'b>>,
+        tracer: Option<NonNull<CcOnHeap<()>>>,
+    ) -> Context<'b> {
         Context {
             inner: ctxi,
+            tracer,
             _phantom: PhantomData,
         }
     }
 
     #[inline]
-    pub(crate) fn inner<'a>(&'a mut self) -> &'a mut ContextInner<'b>
-        where
-        'b: 'a,
-    {
-        &mut self.inner
+    pub(crate) fn inner(&self) -> &'b RefCell<ContextInner<'b>> {
+        self.inner
     }
 }
 
@@ -216,7 +222,7 @@ macro_rules! empty_trace {
         $(
         unsafe impl $crate::trace::Trace for $this {
             #[inline(always)]
-            fn trace(&self, _: &mut $crate::trace::Context<'_>) {}
+            fn trace<'a, 'b: 'a>(&self, _: &'a mut $crate::trace::Context<'b>) {}
         }
 
         impl $crate::trace::Finalize for $this {
@@ -279,7 +285,7 @@ empty_trace! {
 unsafe impl<T> Trace for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
-    fn trace(&self, _: &mut Context<'_>) {}
+    fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
 }
 
 impl<T> Finalize for MaybeUninit<T> {
@@ -290,7 +296,7 @@ impl<T> Finalize for MaybeUninit<T> {
 
 unsafe impl<T> Trace for PhantomData<T> {
     #[inline(always)]
-    fn trace(&self, _: &mut Context<'_>) {}
+    fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
 }
 
 impl<T> Finalize for PhantomData<T> {}
@@ -300,7 +306,7 @@ macro_rules! deref_trace {
         unsafe impl<$generic: $($bound)* $crate::trace::Trace + 'static> $crate::trace::Trace for $this
         {
             #[inline]
-            fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
+            fn trace<'a, 'b: 'a>(&self, ctx: &'a mut $crate::trace::Context<'b>) {
                 let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Trace>::trace(deref, ctx);
             }
@@ -344,7 +350,7 @@ deref_traces_sized! {
 
 unsafe impl<T: ?Sized + Trace + 'static> Trace for RefCell<T> {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Ok(borrow) = self.try_borrow() {
             borrow.trace(ctx);
         }
@@ -362,7 +368,7 @@ impl<T: ?Sized + Finalize + 'static> Finalize for RefCell<T> {
 
 unsafe impl<T: Trace + 'static> Trace for Option<T> {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Some(inner) = self {
             inner.trace(ctx);
         }
@@ -380,7 +386,7 @@ impl<T: Finalize + 'static> Finalize for Option<T> {
 
 unsafe impl<R: Trace + 'static, E: Trace + 'static> Trace for Result<R, E> {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         match self {
             Ok(ok) => ok.trace(ctx),
             Err(err) => err.trace(ctx),
@@ -400,7 +406,7 @@ impl<R: Finalize + 'static, E: Finalize + 'static> Finalize for Result<R, E> {
 
 unsafe impl<T: Trace + 'static, const N: usize> Trace for [T; N] {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         for elem in self {
             elem.trace(ctx);
         }
@@ -418,7 +424,7 @@ impl<T: Finalize + 'static, const N: usize> Finalize for [T; N] {
 
 unsafe impl<T: Trace + 'static> Trace for [T] {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         for elem in self {
             elem.trace(ctx);
         }
@@ -436,7 +442,7 @@ impl<T: Finalize + 'static> Finalize for [T] {
 
 unsafe impl<T: Trace + 'static> Trace for Vec<T> {
     #[inline]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         for elem in self {
             elem.trace(ctx);
         }
@@ -459,7 +465,7 @@ macro_rules! tuple_finalize_trace {
         where $($args: $crate::trace::Trace + 'static),*
         {
             #[inline]
-            fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
+            fn trace<'a, 'b: 'a>(&self, ctx: &'a mut $crate::trace::Context<'b>) {
                 match self {
                     ($($args,)*) => {
                         $(

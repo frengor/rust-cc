@@ -1,11 +1,11 @@
 //! Benchmarks adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
+use std::cell::RefCell;
 use criterion::criterion_group;
 use criterion::{black_box, criterion_main, Criterion};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
-use std::cell::RefMut;
 
 use rust_cc::*;
 use crate::TreeNode::Nested;
@@ -17,32 +17,8 @@ struct DirectedGraphNode {
     edges: Vec<Cc<RefCell<DirectedGraphNode>>>,
 }
 
-struct RefCell<T> {
-    cell: std::cell::RefCell<T>,
-}
-
-impl<T> RefCell<T> {
-    fn new(t: T) -> RefCell<T> {
-        RefCell {
-            cell: std::cell::RefCell::new(t),
-        }
-    }
-
-    fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.cell.borrow_mut()
-    }
-}
-
-unsafe impl<T: Trace> Trace for RefCell<T> {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.cell.borrow().trace(ctx);
-    }
-}
-
-impl<T> Finalize for RefCell<T> {}
-
 unsafe impl Trace for DirectedGraphNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         self.edges.iter().for_each(|elem| elem.trace(ctx));
     }
 }
@@ -121,7 +97,7 @@ enum TreeNode {
 }
 
 unsafe impl Trace for TreeNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Nested { left, right } = self {
             left.trace(ctx);
             right.trace(ctx);

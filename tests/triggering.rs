@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::mem::size_of;
 
-use rust_cc::{collect_cycles, Cc, Context, Trace, Finalize};
 use rust_cc::state::execution_count;
+use rust_cc::{collect_cycles, Cc, Context, Finalize, Trace};
 
 #[test]
 /// Useful to debug triggering.
@@ -16,13 +16,12 @@ fn print_triggers() {
     }
 
     unsafe impl Trace for Traceable {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.inner.trace(ctx);
         }
     }
 
-    impl Finalize for Traceable {
-    }
+    impl Finalize for Traceable {}
 
     fn new() -> Cc<Traceable> {
         Cc::<Traceable>::new_cyclic(|cc| Traceable {
@@ -72,7 +71,7 @@ fn test_trigger() {
     }
 
     unsafe impl Trace for Traceable {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             TRACE.with(|trace| *trace.borrow_mut() = true);
             if let Some(cc) = &self.inner {
                 cc.trace(ctx);
@@ -80,8 +79,7 @@ fn test_trigger() {
         }
     }
 
-    impl Finalize for Traceable {
-    }
+    impl Finalize for Traceable {}
 
     {
         let _traceable = Cc::<Traceable>::new_cyclic(|cc| Traceable {

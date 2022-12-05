@@ -11,9 +11,9 @@ use crate::{config, state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
 
 mod bench_code;
 mod cc;
+mod counter_marker;
 mod list;
 mod panicking;
-mod counter_marker;
 
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
@@ -59,7 +59,7 @@ impl<T: Trace> DerefMut for Droppable<T> {
 }
 
 unsafe impl<T: Trace> Trace for Droppable<T> {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         assert_collecting();
         assert_tracing();
         self.inner.trace(ctx);

@@ -10,15 +10,14 @@ struct Circular {
 }
 
 unsafe impl Trace for Circular {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Some(cc) = unsafe { &*self.cc.as_ptr() } {
             cc.trace(ctx);
         }
     }
 }
 
-impl Finalize for Circular {
-}
+impl Finalize for Circular {}
 
 #[test]
 fn test_simple() {
@@ -155,7 +154,7 @@ fn test_trait_object() {
     struct MyTraitObject(u8);
 
     unsafe impl Trace for MyTraitObject {
-        fn trace(&self, _: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {
             TRACED.with(|traced| traced.set(true));
         }
     }
@@ -201,10 +200,11 @@ fn test_trait_object() {
         let mut l1 = ManuallyDrop::new(List::new());
         let mut l2 = ManuallyDrop::new(List::new());
 
-        cc.trace(&mut Context::new(ContextInner::Counting {
+        cc.trace(&mut Context::new(&RefCell::new(ContextInner::Counting {
             root_list: &mut l1,
             non_root_list: &mut l2,
-        }));
+            graph: &mut Graph::new(),
+        }), None));
     }
 
     assert!(
@@ -234,7 +234,7 @@ fn test_cyclic() {
     }
 
     unsafe impl Trace for Circular {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.cc.trace(ctx);
         }
     }
@@ -254,10 +254,11 @@ fn test_cyclic() {
 
         assert!(
             catch_unwind(AssertUnwindSafe(|| {
-                cc.trace(&mut Context::new(ContextInner::Counting {
+                cc.trace(&mut Context::new(&RefCell::new(ContextInner::Counting {
                     root_list: &mut List::new(),
                     non_root_list: &mut List::new(),
-                }));
+                    graph: &mut Graph::new(),
+                }), None));
             }))
             .is_err(),
             "Didn't panicked on trace."

@@ -141,7 +141,7 @@ struct E {
 }
 
 unsafe impl Trace for A {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Some(ref c) = *self.c.borrow() {
             c.trace(ctx);
         }
@@ -152,7 +152,7 @@ unsafe impl Trace for A {
 }
 
 unsafe impl Trace for B {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         self.e.trace(ctx);
         if let Some(ref b) = *self.b.borrow() {
             b.trace(ctx);
@@ -164,7 +164,7 @@ unsafe impl Trace for B {
 }
 
 unsafe impl Trace for C {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Some(d) = &self.d {
             d.trace(ctx);
         }
@@ -173,11 +173,11 @@ unsafe impl Trace for C {
 }
 
 unsafe impl Trace for D {
-    fn trace(&self, _: &mut Context<'_>) {}
+    fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
 }
 
 unsafe impl Trace for E {
-    fn trace(&self, _: &mut Context<'_>) {}
+    fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
 }
 
 impl Finalize for A {

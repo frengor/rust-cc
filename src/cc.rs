@@ -2,7 +2,7 @@ use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, NonNull};
 use std::rc::Rc;
 
@@ -352,14 +352,14 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         // This must be done, since it is possible to call this function on an invalid instance
         assert!(self.is_valid());
 
         // SAFETY: we have just checked that self is valid
         unsafe {
             if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().elem.trace(ctx);
+                self.inner().elem.trace(&mut Context::new(ctx.inner(), Some(self.inner.cast())));
             }
         }
     }
@@ -528,7 +528,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
 unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
     #[inline(always)]
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         // This should never be called on an invalid instance.
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
@@ -650,7 +650,7 @@ impl CcOnHeap<()> {
         debug_assert!(ptr.as_ref().is_valid());
 
         let counter_marker = ptr.as_ref().counter_marker();
-        match ctx.inner() {
+        match ctx.inner().borrow_mut().deref_mut() {
             ContextInner::Counting { root_list, .. } => {
                 // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
                 // POSSIBLE_CYCLES by rust_cc::collect() (see lib.rs) before calling this function
@@ -689,7 +689,7 @@ impl CcOnHeap<()> {
         // exact type of the element inside CcOnHeap, so trace it using the vtable
         //
         // SAFETY: we require that ptr points to a valid CcOnHeap<_>
-        CcOnHeap::trace_inner(ptr, ctx);
+        CcOnHeap::trace_inner(ptr, &mut Context::new(ctx.inner(), Some(ptr)));
     }
 
     /// Returns whether `ptr.elem` should be traced.
@@ -703,16 +703,22 @@ impl CcOnHeap<()> {
     #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
     unsafe fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         debug_assert!(ptr.as_ref().is_valid());
+        let tracer = ctx.tracer;
 
         let counter_marker = ptr.as_ref().counter_marker();
-        match ctx.inner() {
+        match ctx.inner().borrow_mut().deref_mut() {
             ContextInner::Counting {
                 root_list,
                 non_root_list,
+                graph,
             } => {
                 #[inline(always)]
                 unsafe fn non_root(counter_marker: *mut CounterMarker) -> bool {
                     (*counter_marker).tracing_counter() == (*counter_marker).counter()
+                }
+
+                if let Some(tracer) = tracer {
+                    graph.add_edge(tracer, ptr);
                 }
 
                 if !(*counter_marker).is_marked_trace_counting() {

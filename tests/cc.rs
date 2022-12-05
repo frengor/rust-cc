@@ -23,7 +23,7 @@ fn test_complex() {
     }
 
     unsafe impl Trace for A {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.b.trace(ctx);
         }
     }
@@ -31,7 +31,7 @@ fn test_complex() {
     impl Finalize for A {}
 
     unsafe impl Trace for B {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.c.trace(ctx);
         }
     }
@@ -39,7 +39,7 @@ fn test_complex() {
     impl Finalize for B {}
 
     unsafe impl Trace for D {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.c.trace(ctx);
         }
     }
@@ -47,7 +47,7 @@ fn test_complex() {
     impl Finalize for D {}
 
     unsafe impl Trace for C {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.b.trace(ctx);
             if let Some(cc) = &*self.a.borrow() {
                 cc.trace(ctx);
@@ -121,7 +121,7 @@ fn test_finalization() {
     }
 
     unsafe impl Trace for A {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             if let Some(b) = &*self.b.borrow() {
                 b.trace(ctx);
             }
@@ -129,7 +129,7 @@ fn test_finalization() {
     }
 
     unsafe impl Trace for B {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.a.trace(ctx);
         }
     }
@@ -270,7 +270,7 @@ fn test_finalize_drop() {
     }
 
     unsafe impl Trace for A {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             if let Some(b) = &*self.b.borrow() {
                 b.trace(ctx);
             }
@@ -278,7 +278,7 @@ fn test_finalize_drop() {
     }
 
     unsafe impl Trace for B {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.a.trace(ctx);
         }
     }
@@ -361,9 +361,8 @@ fn rc_test() {
 #[test]
 fn box_test() {
     {
-        let _cc = Cc::<Box<dyn Trace>>::new_cyclic(|cc| {
-            Box::new(Cc::new(cc.clone())) as Box<dyn Trace>
-        });
+        let _cc =
+            Cc::<Box<dyn Trace>>::new_cyclic(|cc| Box::new(Cc::new(cc.clone())) as Box<dyn Trace>);
     }
 
     collect_cycles();

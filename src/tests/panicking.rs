@@ -38,7 +38,7 @@ struct Panicking {
 }
 
 unsafe impl Trace for Panicking {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         let counter = self.trace_counter.get();
         if self.panic_on_trace.get() {
             if counter == 0 {
@@ -138,7 +138,7 @@ fn test_panicking_drop() {
     }
 
     unsafe impl Trace for DropPanicking {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.cyclic.trace(ctx);
         }
     }
@@ -241,7 +241,7 @@ fn test_panicking_tracing_resurrecting() {
     }
 
     unsafe impl Trace for Resurrecter {
-        fn trace(&self, ctx: &mut Context<'_>) {
+        fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
             self.panicking.trace(ctx);
             self.cyclic.trace(ctx);
         }

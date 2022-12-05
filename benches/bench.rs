@@ -63,7 +63,7 @@ macro_rules! define_test {
         }
 
         unsafe impl Trace for $A {
-            fn trace(&self, ctx: &mut Context<'_>) {
+            fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
                 if let Some(ref c) = *self.c.borrow() {
                     c.trace(ctx);
                 }
@@ -74,7 +74,7 @@ macro_rules! define_test {
         }
 
         unsafe impl Trace for $B {
-            fn trace(&self, ctx: &mut Context<'_>) {
+            fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
                 self.e.trace(ctx);
                 if let Some(ref b) = *self.b.borrow() {
                     b.trace(ctx);
@@ -86,18 +86,18 @@ macro_rules! define_test {
         }
 
         unsafe impl Trace for $C {
-            fn trace(&self, ctx: &mut Context<'_>) {
+            fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
                 self.d.trace(ctx);
                 self.b.trace(ctx);
             }
         }
 
         unsafe impl Trace for $D {
-            fn trace(&self, _: &mut Context<'_>) {}
+            fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
         }
 
         unsafe impl Trace for $E {
-            fn trace(&self, _: &mut Context<'_>) {}
+            fn trace<'a, 'b: 'a>(&self, _: &'a mut Context<'b>) {}
         }
     };
     (with_finalizers fn $build_fn:ident, $A:ident, $B:ident, $C:ident, $D:ident, $E:ident) => {
