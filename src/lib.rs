@@ -2,7 +2,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
-use std::ops::Deref;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
@@ -196,21 +195,18 @@ unsafe fn trace_counting(
     non_root_list: &mut List,
     graph: &mut Graph,
 ) {
-    let mut ctx_inner = RefCell::new(ContextInner::Counting {
+    let ctx_inner = RefCell::new(ContextInner::Counting {
         root_list,
         non_root_list,
         graph,
     });
-    let mut ctx = Context::new(&mut ctx_inner, None);
+    let mut ctx = Context::new(&ctx_inner, None);
     CcOnHeap::start_tracing(ptr, &mut ctx);
-    if let ContextInner::Counting { graph, .. } = ctx.inner().borrow_mut().deref() {
-        println!("{:?}", graph);
-    };
 }
 
 fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
-    let mut ctx_inner = RefCell::new(ContextInner::RootTracing { non_root_list });
-    let ctx = &mut Context::new(&mut ctx_inner, None);
+    let ctx_inner = RefCell::new(ContextInner::RootTracing { non_root_list });
+    let ctx = &mut Context::new(&ctx_inner, None);
     root_list.for_each(|ptr| {
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
@@ -220,8 +216,8 @@ fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
 }
 
 fn trace_dropping(non_root_list: &mut List) {
-    let mut ctx_inner = RefCell::new(ContextInner::DropTracing);
-    let ctx = &mut Context::new(&mut ctx_inner, None);
+    let ctx_inner = RefCell::new(ContextInner::DropTracing);
+    let ctx = &mut Context::new(&ctx_inner, None);
     non_root_list.for_each(|ptr| {
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
@@ -231,9 +227,9 @@ fn trace_dropping(non_root_list: &mut List) {
 }
 
 fn trace_resurrecting(non_root_list: &mut List) -> bool {
-    let mut ctx_inner = RefCell::new(ContextInner::DropResurrecting);
+    let ctx_inner = RefCell::new(ContextInner::DropResurrecting);
     let mut has_resurrected = false;
-    let ctx = &mut Context::new(&mut ctx_inner, None);
+    let ctx = &mut Context::new(&ctx_inner, None);
     non_root_list.for_each(|ptr| unsafe {
         if ptr.as_ref().get_tracing_counter() != 0 {
             has_resurrected = true;
