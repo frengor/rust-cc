@@ -24,9 +24,10 @@ pub mod state;
 mod trace;
 mod utils;
 
-use crate::graph::Graph;
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
+
+use crate::graph::Graph;
 
 thread_local! {
     pub(crate) static POSSIBLE_CYCLES: RefCell<List> = RefCell::new(List::new());
@@ -101,7 +102,7 @@ fn collect() {
                 trace_counting(ptr, &mut root_list, &mut non_root_list, &mut graph);
             }
 
-            trace_roots(&mut root_list, &mut non_root_list);
+            trace_roots(&mut root_list, &mut non_root_list, &mut graph);
             root_list.for_each_clearing(|ptr| unsafe {
                 // Reset mark
                 (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
@@ -204,16 +205,53 @@ unsafe fn trace_counting(
     CcOnHeap::start_tracing(ptr, &mut ctx);
 }
 
-fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
-    let ctx_inner = RefCell::new(ContextInner::RootTracing { non_root_list });
-    let ctx = &mut Context::new(&ctx_inner, None);
-    root_list.for_each(|ptr| {
-        // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
+fn trace_roots(root_list: &mut List, non_root_list: &mut List, graph: &mut Graph) {
+    fn filter(edge: &&NonNull<CcOnHeap<()>>, non_root_list: &mut List) -> bool {
         unsafe {
-            CcOnHeap::start_tracing(ptr, ctx);
+            let counter_marker = edge.as_ref().counter_marker();
+            if !(*counter_marker).is_marked_trace_roots() {
+                if !(*counter_marker).is_marked_trace_counting() {
+                    // This CcOnHeap hasn't been traced during trace counting, so
+                    // don't trace it now since it will surely not be deallocated
+                    return false;
+                }
+
+                if (*counter_marker).tracing_counter() < (*counter_marker).counter() {
+                    (*counter_marker).mark(Mark::TraceRoots);
+                    return false;
+                } else {
+                    (*counter_marker).mark(Mark::NonMarked);
+                    non_root_list.remove(**edge);
+                    return true;
+                }
+            }
+            false
+        }
+    }
+
+    // TODO: maybe the allocation(s) for the Vec might be avoidable using a List.
+    //       Also, graph.edges could be able to remove the node from the graph before tracing,
+    //       since the filter function should make sure that no node will be traced twice
+    let mut to_process: Vec<NonNull<CcOnHeap<()>>> = Vec::new();
+
+    root_list.for_each(|root| {
+        unsafe {
+            (*root.as_ref().counter_marker()).mark(Mark::TraceRoots);
+        }
+
+        if let Some(edges) = graph.edges(root) {
+            to_process.extend(edges.filter(|edge| filter(edge, non_root_list)));
         }
     });
+
+    while let Some(node) = to_process.pop() {
+        if let Some(edges) = graph.edges(node) {
+            to_process.extend(edges.filter(|edge| filter(edge, non_root_list)));
+        }
+    }
 }
+
+// TODO: Update trace_dropping and trace_resurrecting to use the new graph algorithm
 
 fn trace_dropping(non_root_list: &mut List) {
     let ctx_inner = RefCell::new(ContextInner::DropTracing);
