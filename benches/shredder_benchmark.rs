@@ -8,7 +8,6 @@ use rand::SeedableRng;
 use std::cell::RefMut;
 
 use rust_cc::*;
-use crate::TreeNode::Nested;
 
 // BENCHMARK 1: My janky stress test
 // (It basically creates a graph where every node is rooted, then de-roots some nodes a few at a time)
@@ -122,7 +121,7 @@ enum TreeNode {
 
 unsafe impl Trace for TreeNode {
     fn trace(&self, ctx: &mut Context<'_>) {
-        if let Nested { left, right } = self {
+        if let Self::Nested { left, right } = self {
             left.trace(ctx);
             right.trace(ctx);
         }
@@ -138,8 +137,8 @@ impl TreeNode {
         }
 
         Self::Nested {
-            left: Cc::new(TreeNode::new(depth - 1)),
-            right: Cc::new(TreeNode::new(depth - 1)),
+            left: Cc::new(Self::new(depth - 1)),
+            right: Cc::new(Self::new(depth - 1)),
         }
     }
 
@@ -157,9 +156,98 @@ pub fn benchmark_count_binary_trees(c: &mut Criterion) {
     });
 }
 
-// TODO: Benchmark with circular references
-// TODO: Benchmark with DerefGc
-// TODO: Do we want to cleanup in the benchmark?
+// BENCHMARK 3: Same as benchmark 2, but with parent pointers. Added by rust-cc
 
-criterion_group!(benches, benchmark_stress_test, benchmark_count_binary_trees);
+fn count_binary_trees_with_parent(max_size: usize) -> Vec<usize> {
+    let mut res = Vec::new();
+    {
+        let min_size = 4;
+
+        for depth in (min_size..max_size).step_by(2) {
+            let iterations = 1 << (max_size - depth + min_size);
+            let mut check = 0;
+
+            for _ in 1..=iterations {
+                check += (TreeNodeWithParent::new(depth)).check();
+            }
+
+            res.push(check);
+        }
+    }
+    collect_cycles();
+    res
+}
+
+enum TreeNodeWithParent {
+    Root {
+        left: Cc<TreeNodeWithParent>,
+        right: Cc<TreeNodeWithParent>,
+    },
+    Nested {
+        parent: Cc<TreeNodeWithParent>,
+        left: Cc<TreeNodeWithParent>,
+        right: Cc<TreeNodeWithParent>,
+    },
+    End,
+}
+
+unsafe impl Trace for TreeNodeWithParent {
+    fn trace(&self, ctx: &mut Context<'_>) {
+        match self {
+            Self::Root { left, right } => {
+                left.trace(ctx);
+                right.trace(ctx);
+            }
+            Self::Nested { parent, left, right } => {
+                parent.trace(ctx);
+                left.trace(ctx);
+                right.trace(ctx);
+            }
+            Self::End => {},
+        }
+    }
+}
+
+impl Finalize for TreeNodeWithParent {}
+
+impl TreeNodeWithParent {
+    fn new(depth: usize) -> Cc<Self> {
+        if depth == 0 {
+            return Cc::new(Self::End);
+        }
+
+        Cc::<Self>::new_cyclic(|cc| Self::Root {
+            left: Self::new_nested(depth - 1, cc.clone()),
+            right: Self::new_nested(depth - 1, cc.clone()),
+        })
+    }
+
+    fn new_nested(depth: usize, parent: Cc<Self>) -> Cc<Self> {
+        if depth == 0 {
+            return Cc::new(Self::End);
+        }
+
+        Cc::<Self>::new_cyclic(|cc| Self::Nested {
+            left: Self::new_nested(depth - 1, cc.clone()),
+            right: Self::new_nested(depth - 1, cc.clone()),
+            parent,
+        })
+    }
+
+    fn check(&self) -> usize {
+        match self {
+            Self::Root { left, right, .. }
+            | Self::Nested { left, right, .. } => left.check() + right.check() + 1,
+            Self::End => 1,
+        }
+    }
+}
+
+pub fn benchmark_count_binary_trees_with_parent(c: &mut Criterion) {
+    c.bench_function("binary trees with parent pointers", |b| {
+        b.iter(|| black_box(count_binary_trees_with_parent(11)))
+    });
+}
+
+criterion_group!(benches, benchmark_stress_test, benchmark_count_binary_trees, benchmark_count_binary_trees_with_parent);
 criterion_main!(benches);
