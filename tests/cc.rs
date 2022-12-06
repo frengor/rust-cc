@@ -368,3 +368,35 @@ fn box_test() {
 
     collect_cycles();
 }
+
+#[test]
+fn alignment_test() {
+    macro_rules! define_structs {
+        ($($i:literal),+) => {
+            $({
+                #[repr(align($i))]
+                struct A {
+                    cc: Cc<A>,
+                }
+
+                unsafe impl Trace for A {
+                    fn trace(&self, ctx: &mut Context<'_>) {
+                        self.cc.trace(ctx);
+                    }
+                }
+
+                impl Finalize for A {}
+
+                fn use_struct() {
+                    let _ = Cc::<A>::new_cyclic(|cc| A {
+                        cc: cc.clone(),
+                    });
+                }
+                use_struct();
+            })+
+            collect_cycles();
+        };
+    }
+
+    define_structs!(1, 2, 4, 8, 16, 32, 64, 128);
+}
