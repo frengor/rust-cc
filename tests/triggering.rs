@@ -1,6 +1,5 @@
 #![cfg(feature = "auto-collect")]
 
-use std::cell::RefCell;
 use std::mem::size_of;
 
 use rust_cc::state::execution_count;
@@ -53,10 +52,6 @@ fn print_triggers() {
 
 #[test]
 fn test_trigger() {
-    thread_local! {
-        static TRACE: RefCell<bool> = RefCell::new(false);
-    }
-
     struct Traceable {
         inner: Option<Cc<Traceable>>,
         _big: Big,
@@ -74,10 +69,7 @@ fn test_trigger() {
 
     unsafe impl Trace for Traceable {
         fn trace(&self, ctx: &mut Context<'_>) {
-            TRACE.with(|trace| *trace.borrow_mut() = true);
-            if let Some(cc) = &self.inner {
-                cc.trace(ctx);
-            }
+            self.inner.trace(ctx);
         }
     }
 
@@ -92,21 +84,15 @@ fn test_trigger() {
             _big: Default::default(),
         });
 
-        assert!(
-            !TRACE.with(|trace| *trace.borrow()),
-            "Collected but shouldn't have collected."
-        );
+        let executions_count = execution_count();
         drop(_traceable);
-        assert!(
-            !TRACE.with(|trace| *trace.borrow()),
-            "Collected but shouldn't have collected."
-        );
+        assert_eq!(executions_count, execution_count(), "Collected but shouldn't have collected.");
 
         let _ = Cc::new(Traceable {
             inner: None,
             _big: Default::default(),
         }); // Collection should be triggered by allocations
-        assert!(TRACE.with(|trace| *trace.borrow()), "Didn't collected");
+        assert_ne!(executions_count, execution_count(), "Didn't collected");
     }
     collect_cycles(); // Make sure to don't leak test's memory
 }
