@@ -17,7 +17,7 @@ struct DirectedGraphNode {
 }
 
 unsafe impl Trace for DirectedGraphNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         self.edges.iter().for_each(|elem| elem.trace(ctx));
     }
 }
@@ -95,7 +95,7 @@ enum TreeNode {
 }
 
 unsafe impl Trace for TreeNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         if let Self::Nested { left, right } = self {
             left.trace(ctx);
             right.trace(ctx);
@@ -167,7 +167,7 @@ enum TreeNodeWithParent {
 }
 
 unsafe impl Trace for TreeNodeWithParent {
-    fn trace(&self, ctx: &mut Context<'_>) {
+    fn trace<'a, 'b: 'a>(&self, ctx: &'a mut Context<'b>) {
         match self {
             Self::Root { left, right } => {
                 left.trace(ctx);
