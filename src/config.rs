@@ -67,32 +67,32 @@ impl Config {
 
     #[inline(always)]
     pub(crate) fn adjust(&mut self, state: &State) {
+        // First case: the threshold might have to be increased
         if state.allocated_bytes() >= self.bytes_threshold {
+
+            // Feeling the absence of do-while here ='(
             let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { return; };
             self.bytes_threshold = new_threshold;
             while state.allocated_bytes() >= self.bytes_threshold {
                 let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { return; };
                 self.bytes_threshold = new_threshold;
             }
-            return;
+
+            return; // Skip the other case
         }
 
+        // Second case: the threshold might have to be decreased
         let allocated = state.allocated_bytes() as f64;
         let mut bytes_threshold = self.bytes_threshold;
-        if allocated <= ((self.bytes_threshold as f64) * self.adjustment_percent) {
+
+        // No more cases after this, there's no need to use an additional if as above
+        while allocated <= ((self.bytes_threshold as f64) * self.adjustment_percent) {
             bytes_threshold <<= 1;
             if bytes_threshold <= DEFAULT_BYTES_THRESHOLD {
                 self.bytes_threshold = DEFAULT_BYTES_THRESHOLD;
                 return;
             }
-            while allocated <= ((self.bytes_threshold as f64) * self.adjustment_percent) {
-                bytes_threshold <<= 1;
-                if bytes_threshold <= DEFAULT_BYTES_THRESHOLD {
-                    self.bytes_threshold = DEFAULT_BYTES_THRESHOLD;
-                    return;
-                }
-            }
-            self.bytes_threshold = bytes_threshold;
         }
+        self.bytes_threshold = bytes_threshold;
     }
 }
