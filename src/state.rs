@@ -95,7 +95,7 @@ impl State {
 #[inline]
 #[track_caller]
 pub fn allocated_bytes() -> usize {
-    state(|state| state.allocated_bytes)
+    state(|state| state.allocated_bytes())
 }
 
 #[inline]

@@ -5,7 +5,6 @@ use std::cell::RefCell;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
-use crate::config::config;
 use crate::counter_marker::Mark;
 use crate::list::List;
 use crate::state::{replace_state_field, state, State, try_state};
@@ -16,12 +15,14 @@ use crate::utils::*;
 mod tests;
 
 mod cc;
-pub mod config;
 mod counter_marker;
 mod list;
 pub mod state;
 mod trace;
 mod utils;
+
+#[cfg(feature = "auto-collect")]
+pub mod config;
 
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
@@ -36,13 +37,16 @@ pub fn collect_cycles() {
     }
 
     collect();
+
+    #[cfg(feature = "auto-collect")]
     adjust_trigger_point();
 }
 
+#[cfg(feature = "auto-collect")]
 #[inline(never)]
 pub(crate) fn trigger_collection() {
     let should_collect = state(|state| {
-        !state.is_collecting() && config(|config| config.should_collect(state)).unwrap_or(false)
+        !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false)
     });
 
     if should_collect {
@@ -51,8 +55,9 @@ pub(crate) fn trigger_collection() {
     }
 }
 
+#[cfg(feature = "auto-collect")]
 fn adjust_trigger_point() {
-    let _ = config(|config| state(|state| config.adjust(state)));
+    let _ = config::config(|config| state(|state| config.adjust(state)));
 }
 
 fn collect() {

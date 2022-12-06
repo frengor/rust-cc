@@ -4,10 +4,9 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use crate::config::Config;
 use crate::state::State;
 use crate::trace::Trace;
-use crate::{config, state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
+use crate::{state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
 
 mod bench_code;
 mod cc;
@@ -20,7 +19,12 @@ pub(crate) fn reset_state() {
         pc.replace(List::new()).for_each_clearing(|_| {});
     });
     state(|state| *state = State::default());
-    config(|config| *config = Config::default()).expect("Couldn't reset the config.");
+
+    #[cfg(feature = "auto-collect")]
+    {
+        use super::config::{config, Config};
+        config(|config| *config = Config::default()).expect("Couldn't reset the config.");
+    }
 }
 
 pub(crate) struct Droppable<T: Trace> {

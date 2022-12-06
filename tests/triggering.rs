@@ -1,3 +1,5 @@
+#![cfg(feature = "auto-collect")]
+
 use std::cell::RefCell;
 use std::mem::size_of;
 

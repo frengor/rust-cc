@@ -17,7 +17,7 @@ use crate::counter_marker::{CounterMarker, Mark, OverflowError};
 use crate::state::{replace_state_field, state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
-use crate::{trigger_collection, try_state, POSSIBLE_CYCLES};
+use crate::{try_state, POSSIBLE_CYCLES};
 
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
@@ -41,7 +41,10 @@ impl<T: Trace + 'static> Cc<T> {
         if state(|state| state.is_tracing()) {
             panic!("Cannot create a new Cc while tracing!");
         }
-        trigger_collection();
+
+        #[cfg(feature = "auto-collect")]
+        super::trigger_collection();
+
         Cc {
             inner: CcOnHeap::new(t),
             _phantom: PhantomData,
@@ -57,7 +60,9 @@ impl<T: Trace + 'static> Cc<T> {
         if state(|state| state.is_tracing()) {
             panic!("Cannot create a new Cc while tracing!");
         }
-        trigger_collection();
+
+        #[cfg(feature = "auto-collect")]
+        super::trigger_collection();
 
         let mut invalid = CcOnHeap::<T>::new_invalid();
         let cc = Cc {
