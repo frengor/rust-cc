@@ -1,11 +1,11 @@
 //! Benchmarks adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
+use std::cell::RefCell;
 use criterion::criterion_group;
 use criterion::{black_box, criterion_main, Criterion};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
-use std::cell::RefMut;
 
 use rust_cc::*;
 
@@ -15,30 +15,6 @@ struct DirectedGraphNode {
     _label: String,
     edges: Vec<Cc<RefCell<DirectedGraphNode>>>,
 }
-
-struct RefCell<T> {
-    cell: std::cell::RefCell<T>,
-}
-
-impl<T> RefCell<T> {
-    fn new(t: T) -> RefCell<T> {
-        RefCell {
-            cell: std::cell::RefCell::new(t),
-        }
-    }
-
-    fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.cell.borrow_mut()
-    }
-}
-
-unsafe impl<T: Trace> Trace for RefCell<T> {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.cell.borrow().trace(ctx);
-    }
-}
-
-impl<T> Finalize for RefCell<T> {}
 
 unsafe impl Trace for DirectedGraphNode {
     fn trace(&self, ctx: &mut Context<'_>) {
@@ -110,7 +86,6 @@ fn count_binary_trees(max_size: usize) -> Vec<usize> {
     res
 }
 
-// If were feeling idiomatic, we'd use GcDeref here
 enum TreeNode {
     Nested {
         left: Cc<TreeNode>,
