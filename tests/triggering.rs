@@ -1,58 +1,11 @@
 #![cfg(feature = "auto-collect")]
 
-use std::mem::size_of;
-
 use rust_cc::state::execution_count;
 use rust_cc::{collect_cycles, Cc, Context, Finalize, Trace};
 use rust_cc::config::config;
 
 #[test]
-/// Useful to debug triggering.
-/// To be called with `cargo test print_triggers -- --nocapture`
-fn print_triggers() {
-    const LENGTH: usize = 50;
-
-    struct Traceable {
-        inner: Cc<Traceable>,
-        _elem: [u8; LENGTH],
-    }
-
-    unsafe impl Trace for Traceable {
-        fn trace(&self, ctx: &mut Context<'_>) {
-            self.inner.trace(ctx);
-        }
-    }
-
-    impl Finalize for Traceable {}
-
-    fn new() -> Cc<Traceable> {
-        Cc::<Traceable>::new_cyclic(|cc| Traceable {
-            inner: cc.clone(),
-            _elem: [0u8; LENGTH],
-        })
-    }
-
-    {
-        {
-            println!("Size: {}", size_of::<Traceable>() + 32);
-            let _ = new();
-            println!("{}", execution_count());
-            let _ = Cc::new(());
-            println!("{}", execution_count());
-            let _a = new();
-            let _b = new();
-            let _c = new();
-            let _d = new();
-        }
-        println!("{}", execution_count());
-        let _ = new();
-        println!("{}", execution_count());
-    }
-    collect_cycles(); // Make sure to don't leak test's memory
-}
-
-#[test]
-fn test_trigger() {
+fn test_auto_collect() {
     struct Traceable {
         inner: Option<Cc<Traceable>>,
         _big: Big,
