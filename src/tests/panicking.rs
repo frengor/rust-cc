@@ -84,7 +84,8 @@ fn test_panicking_tracing_counting() {
     panicking_collect_cycles(assert_state_not_collecting);
 }
 
-#[test]
+// Commented out since the second tracing is now performed on the graph and cannot panic
+/*#[test]
 #[should_panic = "Test panic on Trace"]
 fn test_panicking_tracing_root() {
     reset_state();
@@ -108,7 +109,7 @@ fn test_panicking_tracing_root() {
         root.clone()
     };
     panicking_collect_cycles(assert_state_not_collecting);
-}
+}*/
 
 #[test]
 #[should_panic = "Test panic on Finalize"]
