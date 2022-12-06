@@ -33,6 +33,7 @@ pub struct Config {
     // bytes_threshold * adjustment_percent < allocated_bytes < bytes_threshold
     bytes_threshold: usize,
     adjustment_percent: f64,
+    auto_collect: bool,
 }
 
 impl Default for Config {
@@ -40,11 +41,22 @@ impl Default for Config {
         Config {
             bytes_threshold: DEFAULT_BYTES_THRESHOLD,
             adjustment_percent: 0.25,
+            auto_collect: true,
         }
     }
 }
 
 impl Config {
+    #[inline]
+    pub fn auto_collect(&self) -> bool {
+        self.auto_collect
+    }
+
+    #[inline]
+    pub fn set_auto_collect(&mut self, auto_collect: bool) {
+        self.auto_collect = auto_collect;
+    }
+
     #[inline]
     pub fn adjustment_percent(&self) -> f64 {
         self.adjustment_percent
@@ -61,12 +73,12 @@ impl Config {
     }
 
     #[inline(always)]
-    pub(crate) fn should_collect(&mut self, state: &State) -> bool {
-        state.allocated_bytes() > self.bytes_threshold
+    pub(super) fn should_collect(&mut self, state: &State) -> bool {
+        self.auto_collect() && state.allocated_bytes() > self.bytes_threshold
     }
 
     #[inline(always)]
-    pub(crate) fn adjust(&mut self, state: &State) {
+    pub(super) fn adjust(&mut self, state: &State) {
         // First case: the threshold might have to be increased
         if state.allocated_bytes() >= self.bytes_threshold {
 
