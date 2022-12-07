@@ -4,6 +4,28 @@ use std::mem;
 use crate::tests::{assert_state_not_collecting, reset_state};
 use crate::{collect_cycles, Cc, Context, Finalize, Trace};
 
+fn register_panicking<T: Trace>(cc: &Cc<T>) {
+    #[cfg(miri)]
+    extern "Rust" {
+        /// From Miri documentation:<br>
+        /// _Miri-provided extern function to mark the block `ptr` points to as a "root"
+        /// for some static memory. This memory and everything reachable by it is not
+        /// considered leaking even if it still exists when the program terminates._<br>
+        fn miri_static_root(ptr: *const u8);
+    }
+
+    assert!(cc.is_valid());
+
+    #[cfg(miri)]
+    // Use miri_static_root to avoid failures caused by leaks. Leaks are expected,
+    // since this module tests panics (which leaks memory to prevent UB)
+    unsafe {
+        use core::mem::transmute;
+
+        miri_static_root(*transmute::<_, &*const u8>(cc));
+    }
+}
+
 fn panicking_collect_cycles(on_panic: impl FnOnce()) {
     struct DropGuard<F>
     where
@@ -73,13 +95,14 @@ fn test_panicking_tracing_counting() {
     reset_state();
 
     {
-        let _ = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
             trace_counter: Cell::new(0),
             panic_on_trace: Cell::new(true),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(false),
             cc: cc.clone(),
-        });
+        }));
+
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -104,6 +127,8 @@ fn test_panicking_tracing_root() {
                 cc: cc.clone(),
             }),
         });
+        register_panicking(&root);
+        register_panicking(&root.cc);
         #[allow(clippy::redundant_clone)]
         root.clone()
     };
@@ -116,13 +141,13 @@ fn test_panicking_finalize() {
     reset_state();
 
     {
-        let _ = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
             trace_counter: Cell::new(usize::MAX),
             panic_on_trace: Cell::new(false),
             panic_on_finalize: Cell::new(true),
             panic_on_drop: Cell::new(false),
             cc: cc.clone(),
-        });
+        }));
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -153,7 +178,7 @@ fn test_panicking_drop() {
     }
 
     {
-        let _ = Cc::<DropPanicking>::new_cyclic(|cc| DropPanicking { cyclic: cc.clone() });
+        register_panicking(&Cc::<DropPanicking>::new_cyclic(|cc| DropPanicking { cyclic: cc.clone() }));
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -164,13 +189,13 @@ fn test_panicking_drop_and_finalize() {
     reset_state();
 
     {
-        let _ = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
             trace_counter: Cell::new(usize::MAX),
             panic_on_trace: Cell::new(false),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(true),
             cc: cc.clone(),
-        });
+        }));
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -188,7 +213,7 @@ fn test_panicking_tracing_drop() {
         // call will panic, which is during dropping tracing
         const CELL_VALUE: usize = 1;
 
-        let _ = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let root = Cc::<Panicking>::new_cyclic(|cc| Panicking {
             trace_counter: Cell::new(CELL_VALUE),
             panic_on_trace: Cell::new(true),
             panic_on_finalize: Cell::new(false),
@@ -201,6 +226,9 @@ fn test_panicking_tracing_drop() {
                 cc: cc.clone(),
             }),
         });
+
+        register_panicking(&root);
+        register_panicking(&root.cc);
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -270,6 +298,9 @@ fn test_panicking_tracing_resurrecting() {
             }),
             cyclic: cc_res.clone(),
         });
+        register_panicking(&a);
+        register_panicking(&a.panicking);
+        register_panicking(&a.panicking.cc);
         drop(a);
     }
 
