@@ -341,6 +341,43 @@ fn test_finalize_drop() {
     assert!(DROPPEDB.with(|cell| cell.get()));
 }
 
+#[test]
+fn finalization_test() {
+    struct Circular {
+        next: Cc<Circular>,
+        does_finalization: bool,
+    }
+
+    unsafe impl Trace for Circular {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.next.trace(ctx);
+        }
+    }
+
+    impl Finalize for Circular {
+        fn finalize(&mut self) {
+            if self.does_finalization {
+                self.next = Cc::new(Circular {
+                    next: self.next.clone(),
+                    does_finalization: false,
+                });
+                self.does_finalization = false;
+            }
+        }
+    }
+
+    {
+        let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
+            next: Cc::new(Circular {
+                next: cc.clone(),
+                does_finalization: false,
+            }),
+            does_finalization: true,
+        });
+    }
+    collect_cycles();
+}
+
 // Code which created UB when Rc had Trace implemented
 // Commented to avoid compilation errors since Rc doesn't implement Trace anymore
 /*#[test]
