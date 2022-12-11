@@ -242,7 +242,7 @@ fn test_cyclic() {
     impl Finalize for Circular {}
 
     let cc = Cc::<Circular>::new_cyclic(|cc| {
-        assert!(!cc.is_valid_for_test());
+        assert!(!cc.is_valid());
 
         assert!(
             catch_unwind(AssertUnwindSafe(|| {
@@ -271,7 +271,7 @@ fn test_cyclic() {
         Circular { cc: cc.clone() }
     });
 
-    assert!(cc.is_valid_for_test());
+    assert!(cc.is_valid());
     assert_eq!(cc.strong_count(), 2);
 
     assert!(Cc::ptr_eq(&cc, &cc.cc));
