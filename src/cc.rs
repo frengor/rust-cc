@@ -226,12 +226,6 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         }
     }
 
-    #[inline(always)]
-    #[cfg(test)] // Don't expose is_valid to tests, expose this instead
-    pub(crate) fn is_valid_for_test(&self) -> bool {
-        self.is_valid()
-    }
-
     /// Note: don't access self.inner().elem if CcOnHeap is not valid!
     #[inline(always)]
     fn inner(&self) -> &CcOnHeap<T> {
@@ -483,7 +477,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
     #[inline]
     #[cfg(test)]
-    pub(crate) fn get_elem(&self) -> &T {
+    pub(crate) fn get_elem_for_tests(&self) -> &T {
         assert!(self.is_valid());
         &self.elem
     }
