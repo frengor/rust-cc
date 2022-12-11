@@ -138,7 +138,7 @@ fn collect() {
                     if !has_finalized {
                         deallocate_list(non_root_list);
                     } else {
-                        trace_dropping(&mut non_root_list);
+                        /*trace_dropping(&mut non_root_list);
 
                         if trace_resurrecting(&mut non_root_list) {
                             let mut to_deallocate_list = List::new();
@@ -155,7 +155,19 @@ fn collect() {
                             deallocate_list(to_deallocate_list);
                         } else {
                             deallocate_list(non_root_list);
-                        }
+                        }*/
+
+                        // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
+                        // next iteration of the loop, which will automatically check for resurrected objects
+                        // using the same algorithm of the initial tracing. This makes it more difficult to
+                        // create memory leaks accidentally using finalizers than in the previous implementations.
+                        POSSIBLE_CYCLES.with(|pc| {
+                            let mut pc = pc.borrow_mut();
+                            non_root_list.for_each_clearing(|ptr| {
+                                (*ptr.as_ref().counter_marker()).mark(Mark::PossibleCycles);
+                                pc.add(ptr);
+                            });
+                        });
                     }
                 }
             }

@@ -10,12 +10,11 @@ const INVALID: u32 = 0b111u32 << (u32::BITS - 3);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
 const TRACING_COUNTER_MASK: u32 = COUNTER_MASK << 14; // 14 bits set to 1 followed by 14 bits set to 0
-const FINALIZABLE_MASK: u32 = 1u32 << (u32::BITS - 4);
-const BITS_MASK: u32 = !(COUNTER_MASK | TRACING_COUNTER_MASK | FINALIZABLE_MASK);
+const FINALIZED_MASK: u32 = 1u32 << (u32::BITS - 4);
+const BITS_MASK: u32 = !(COUNTER_MASK | TRACING_COUNTER_MASK | FINALIZED_MASK);
 const FIRST_TWO_BITS_MASK: u32 = 3u32 << (u32::BITS - 2);
 
 const INITIAL_VALUE: u32 = COUNTER_MASK + 2; // +2 means that tracing counter and counter are both set to 1
-const INITIAL_VALUE_FINALIZABLE: u32 = FINALIZABLE_MASK | INITIAL_VALUE;
 
 const MAX: u32 = COUNTER_MASK;
 
@@ -33,7 +32,7 @@ const MAX: u32 = COUNTER_MASK;
 ///   * `TRACING_ROOT_MARKED`
 ///   * `TRACING_DROPPING_MARKED`
 ///   * `INVALID` (`CcOnHeap` is invalid)
-/// * `B` is `1` when the element inside `CcOnHeap` is finalizable, `0` otherwise
+/// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
 /// * `D` is the counter (last one for sum/subtraction efficiency)
 #[derive(Copy, Clone, Debug)]
@@ -47,13 +46,9 @@ pub(crate) struct OverflowError;
 impl CounterMarker {
     #[inline]
     #[must_use]
-    pub(crate) fn new_with_counter_to_one(finalizable: bool) -> CounterMarker {
+    pub(crate) fn new_with_counter_to_one() -> CounterMarker {
         CounterMarker {
-            counter: if finalizable {
-                INITIAL_VALUE_FINALIZABLE
-            } else {
-                INITIAL_VALUE
-            },
+            counter: INITIAL_VALUE,
         }
     }
 
@@ -124,8 +119,17 @@ impl CounterMarker {
     }
 
     #[inline]
-    pub(crate) fn is_finalizable(&self) -> bool {
-        (self.counter & FINALIZABLE_MASK) != 0u32
+    pub(crate) fn needs_finalization(&self) -> bool {
+        (self.counter & FINALIZED_MASK) == 0u32
+    }
+
+    #[inline]
+    pub(crate) fn set_finalized(&mut self, finalized: bool) {
+        if finalized {
+            self.counter |= FINALIZED_MASK;
+        } else {
+            self.counter &= !FINALIZED_MASK;
+        }
     }
 
     #[inline]
