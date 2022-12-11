@@ -233,8 +233,10 @@ fn test_finalization() {
     }
     collect_cycles();
 
-    assert!(FINALIZED.with(|cell| cell.get()));
-    assert!(FINALIZEDB.with(|cell| cell.get()));
+    // This tests that finalizers are called only one time per object
+    assert!(!FINALIZED.with(|cell| cell.get()));
+    assert!(!FINALIZEDB.with(|cell| cell.get()));
+
     assert!(DROPPED.with(|cell| cell.get()));
     assert!(DROPPEDB.with(|cell| cell.get()));
 }
