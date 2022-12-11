@@ -210,6 +210,22 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.inner().is_valid()
     }
 
+    #[inline]
+    #[track_caller]
+    pub fn finalize_again(&mut self) {
+        assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
+
+        self.inner_mut().counter_marker.get_mut().set_finalized(false);
+    }
+
+    #[inline]
+    pub fn already_finalized(&self) -> bool {
+        // SAFETY: it's always safe to access the counter_marker
+        unsafe {
+            !(*self.inner().counter_marker.get()).needs_finalization()
+        }
+    }
+
     #[inline(always)]
     #[cfg(test)] // Don't expose is_valid to tests, expose this instead
     pub(crate) fn is_valid_for_test(&self) -> bool {
