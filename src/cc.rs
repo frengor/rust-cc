@@ -310,10 +310,10 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
         if let Ok((collecting, finalizing)) = res {
             // We know that inner is valid, so this is true only when collecting is true and counter_marker is traced
             if collecting && counter_marker.is_traced_or_invalid() {
-                if finalizing {
+                /*if finalizing {
                     let res = counter_marker.decrement_tracing_counter();
                     debug_assert!(res.is_ok());
-                }
+                }*/
                 return;
             }
         } else {
@@ -328,8 +328,15 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             let layout = self.inner().layout();
 
-            let to_drop = if self.inner().is_finalizable() {
+            let to_drop = if self.inner().needs_finalization() {
                 let _finalizing_guard = replace_state_field!(finalizing, true);
+
+                // Set finalized
+                // SAFETY: it's always safe to access the counter_marker
+                unsafe {
+                    (*self.inner().counter_marker()).set_finalized(true);
+                }
+
                 self.inner_mut().elem.finalize();
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
@@ -405,7 +412,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn Trace),
-                    counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one(true)),
+                    counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one()),
                     _phantom: PhantomData,
                     elem: t,
                 },
@@ -439,7 +446,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                         ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace
                     ),
                     counter_marker: UnsafeCell::new({
-                        let mut cm = CounterMarker::new_with_counter_to_one(true);
+                        let mut cm = CounterMarker::new_with_counter_to_one();
                         cm.mark(Mark::Invalid);
                         cm
                     }),
@@ -515,9 +522,9 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    pub(crate) fn is_finalizable(&self) -> bool {
+    pub(crate) fn needs_finalization(&self) -> bool {
         // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).is_finalizable() }
+        unsafe { (*self.counter_marker()).needs_finalization() }
     }
 
     #[inline]
@@ -623,8 +630,18 @@ impl CcOnHeap<()> {
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
-        CcOnHeap::get_traceable(ptr).as_mut().finalize();
-        true
+        if ptr.as_ref().needs_finalization() {
+            // Set finalized
+            // SAFETY: it's always safe to access the counter_marker
+            unsafe {
+                (*ptr.as_ref().counter_marker()).set_finalized(true);
+            }
+
+            CcOnHeap::get_traceable(ptr).as_mut().finalize();
+            true
+        } else {
+            false
+        }
     }
 
     /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
