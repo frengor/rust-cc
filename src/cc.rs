@@ -314,13 +314,13 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
         // If we're collecting and we're traced then we're part of a list different than POSSIBLE_CYCLES.
         // Almost no further action has to be taken, since the counter has been already decremented.
-        if let Ok(collecting) = try_state(|state| (state.is_collecting())) {
-            // We know that inner is valid, so this is true only when collecting is true and counter_marker is traced
-            if collecting && counter_marker.is_traced_or_invalid() {
-                return;
-            }
-        } else {
+        let Ok(collecting) = try_state(|state| (state.is_collecting())) else {
             // If state is not accessible then don't proceed further
+            return;
+        };
+
+        // We know that inner is valid, so this is true only when collecting is true and counter_marker is traced
+        if collecting && counter_marker.is_traced_or_invalid() {
             return;
         }
 
