@@ -19,7 +19,7 @@ pub(crate) fn try_state<R>(f: impl FnOnce(&mut State) -> R) -> Result<R, StateAc
 }
 
 #[derive(Error, Debug)]
-pub enum StateAccessError {
+pub(crate) enum StateAccessError {
     #[error(transparent)]
     AccessError(#[from] AccessError),
     #[error(transparent)]

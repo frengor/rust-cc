@@ -314,16 +314,9 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
         // If we're collecting and we're traced then we're part of a list different than POSSIBLE_CYCLES.
         // Almost no further action has to be taken, since the counter has been already decremented.
-        // The last thing remaining to do is decrementing the tracing counter if we're both
-        // collecting and finalizing to allow checking for resurrected objects.
-        let res = try_state(|state| (state.is_collecting(), state.is_finalizing()));
-        if let Ok((collecting, finalizing)) = res {
+        if let Ok(collecting) = try_state(|state| (state.is_collecting())) {
             // We know that inner is valid, so this is true only when collecting is true and counter_marker is traced
             if collecting && counter_marker.is_traced_or_invalid() {
-                /*if finalizing {
-                    let res = counter_marker.decrement_tracing_counter();
-                    debug_assert!(res.is_ok());
-                }*/
                 return;
             }
         } else {
@@ -434,7 +427,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     #[inline(always)]
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn new_for_test(t: T) -> NonNull<CcOnHeap<T>> {
+    pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
         CcOnHeap::new(t)
     }
 
@@ -631,13 +624,13 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
 
 // Functions in common between every CcOnHeap<_>
 impl CcOnHeap<()> {
-    /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
+    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
     }
 
-    /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
+    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
         if ptr.as_ref().needs_finalization() {
@@ -654,13 +647,14 @@ impl CcOnHeap<()> {
         }
     }
 
-    /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
+    /// SAFETY: `drop_in_place` conditions must be true and ptr must be pointing to a valid CcOnHeap<_>.
+    ///         More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
         drop_in_place(CcOnHeap::get_traceable(ptr).as_ptr());
     }
 
-    /// SAFETY: self must be valid. More formally, `self.is_valid()` must return `true`.
+    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn Trace> {
         debug_assert!(ptr.as_ref().is_valid()); // Just to be sure
@@ -700,18 +694,6 @@ impl CcOnHeap<()> {
 
                 // Element is not already marked, marking
                 (*counter_marker).mark(Mark::TraceRoots);
-            },
-            ContextInner::DropTracing => {
-                if (*counter_marker).is_marked_trace_dropping() {
-                    return;
-                }
-                (*counter_marker).mark(Mark::TraceDropping);
-            },
-            ContextInner::DropResurrecting => {
-                if (*counter_marker).is_marked_trace_resurrecting() {
-                    return;
-                }
-                (*counter_marker).mark(Mark::TraceResurrecting);
             },
         }
 
@@ -824,30 +806,6 @@ impl CcOnHeap<()> {
                 }
                 // Don't continue trace in any other case
                 false
-            },
-            ContextInner::DropTracing => {
-                if (*counter_marker).is_marked_trace_dropping() {
-                    let res = (*counter_marker).decrement_tracing_counter();
-                    debug_assert!(res.is_ok());
-                    false
-                } else if (*counter_marker).is_marked_trace_roots() {
-                    (*counter_marker).mark(Mark::TraceDropping);
-                    let res = (*counter_marker).decrement_tracing_counter();
-                    debug_assert!(res.is_ok());
-                    true
-                } else {
-                    false
-                }
-            },
-            ContextInner::DropResurrecting => {
-                if !(*counter_marker).is_marked_trace_dropping()
-                    || (*counter_marker).is_marked_trace_resurrecting()
-                {
-                    false
-                } else {
-                    (*counter_marker).mark(Mark::TraceResurrecting);
-                    true
-                }
             },
         }
     }

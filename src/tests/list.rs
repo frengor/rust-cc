@@ -26,7 +26,7 @@ fn assert_contains(list: &List, mut elements: Vec<i32>) {
 fn new_list(elements: &[i32], list: &mut List) -> Vec<NonNull<CcOnHeap<i32>>> {
     elements
         .iter()
-        .map(|&i| CcOnHeap::new_for_test(i))
+        .map(|&i| CcOnHeap::new_for_tests(i))
         .inspect(|&ptr| list.add(ptr.cast()))
         .collect()
 }

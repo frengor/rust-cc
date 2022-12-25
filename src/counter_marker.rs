@@ -4,8 +4,6 @@ const NON_MARKED: u32 = 0u32;
 const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 3);
 const TRACING_COUNTING_MARKED: u32 = 2u32 << (u32::BITS - 3);
 const TRACING_ROOTS_MARKED: u32 = 3u32 << (u32::BITS - 3);
-const TRACING_DROPPING_MARKED: u32 = 4u32 << (u32::BITS - 3);
-const TRACING_RESURRECTING_MARKED: u32 = 5u32 << (u32::BITS - 3);
 const INVALID: u32 = 0b111u32 << (u32::BITS - 3);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
@@ -30,7 +28,6 @@ const MAX: u32 = COUNTER_MASK;
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
 ///   * `TRACING_COUNTING_MARKED`
 ///   * `TRACING_ROOT_MARKED`
-///   * `TRACING_DROPPING_MARKED`
 ///   * `INVALID` (`CcOnHeap` is invalid)
 /// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
@@ -87,7 +84,7 @@ impl CounterMarker {
     }
 
     #[inline]
-    pub(crate) fn decrement_tracing_counter(&mut self) -> Result<(), OverflowError> {
+    pub(crate) fn _decrement_tracing_counter(&mut self) -> Result<(), OverflowError> {
         if self.tracing_counter() == 0 {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
@@ -158,16 +155,6 @@ impl CounterMarker {
     }
 
     #[inline]
-    pub(crate) fn is_marked_trace_dropping(&self) -> bool {
-        (self.counter & BITS_MASK) == TRACING_DROPPING_MARKED
-    }
-
-    #[inline]
-    pub(crate) fn is_marked_trace_resurrecting(&self) -> bool {
-        (self.counter & BITS_MASK) == TRACING_RESURRECTING_MARKED
-    }
-
-    #[inline]
     pub(crate) fn is_valid(&self) -> bool {
         (self.counter & BITS_MASK) != INVALID
     }
@@ -185,7 +172,5 @@ pub(crate) enum Mark {
     PossibleCycles = IN_POSSIBLE_CYCLES,
     TraceCounting = TRACING_COUNTING_MARKED,
     TraceRoots = TRACING_ROOTS_MARKED,
-    TraceDropping = TRACING_DROPPING_MARKED,
-    TraceResurrecting = TRACING_RESURRECTING_MARKED,
     Invalid = INVALID,
 }
