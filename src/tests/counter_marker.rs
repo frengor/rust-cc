@@ -14,7 +14,6 @@ fn test_new() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         assert_eq!(counter.counter(), 1);
@@ -47,8 +46,6 @@ fn test_increment_decrement() {
             assert!(!counter.is_in_possible_cycles());
             assert!(!counter.is_marked_trace_counting());
             assert!(!counter.is_marked_trace_roots());
-            assert!(!counter.is_marked_trace_dropping());
-            assert!(!counter.is_marked_trace_resurrecting());
             assert!(counter.is_valid());
         }
 
@@ -81,7 +78,7 @@ fn test_increment_decrement() {
         assert_not_marked(&mut counter);
 
         assert_eq!(counter.counter(), 1);
-        assert!(counter.decrement_tracing_counter().is_ok());
+        assert!(counter._decrement_tracing_counter().is_ok());
 
         assert_not_marked(&mut counter);
 
@@ -108,9 +105,9 @@ fn test_increment_decrement() {
             assert!(counter.decrement_counter().is_err());
 
             while counter.tracing_counter() > 0 {
-                assert!(counter.decrement_tracing_counter().is_ok());
+                assert!(counter._decrement_tracing_counter().is_ok());
             }
-            assert!(counter.decrement_tracing_counter().is_err());
+            assert!(counter._decrement_tracing_counter().is_err());
         }
 
         assert_not_marked(&mut counter);
@@ -127,8 +124,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
@@ -137,8 +132,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::PossibleCycles);
@@ -147,8 +140,6 @@ fn test_marks() {
         assert!(counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::TraceCounting);
@@ -157,8 +148,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::TraceRoots);
@@ -167,28 +156,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
-        assert!(counter.is_valid());
-
-        counter.mark(Mark::TraceDropping);
-
-        assert!(!counter.is_not_marked());
-        assert!(!counter.is_in_possible_cycles());
-        assert!(!counter.is_marked_trace_counting());
-        assert!(!counter.is_marked_trace_roots());
-        assert!(counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
-        assert!(counter.is_valid());
-
-        counter.mark(Mark::TraceResurrecting);
-
-        assert!(!counter.is_not_marked());
-        assert!(!counter.is_in_possible_cycles());
-        assert!(!counter.is_marked_trace_counting());
-        assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
@@ -197,8 +164,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(counter.is_valid());
 
         counter.mark(Mark::Invalid);
@@ -207,8 +172,6 @@ fn test_marks() {
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
         assert!(!counter.is_marked_trace_roots());
-        assert!(!counter.is_marked_trace_dropping());
-        assert!(!counter.is_marked_trace_resurrecting());
         assert!(!counter.is_valid());
     }
 
