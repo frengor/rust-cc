@@ -335,7 +335,10 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     (*self.inner().counter_marker()).set_finalized(true);
                 }
 
-                self.inner_mut().elem.get_mut().finalize();
+                // SAFETY: inner is valid, so elem.get() can be dereferenced
+                unsafe {
+                    (*self.inner().elem.get()).finalize();
+                }
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
             } else {
@@ -636,7 +639,7 @@ impl CcOnHeap<()> {
                 (*ptr.as_ref().counter_marker()).set_finalized(true);
             }
 
-            CcOnHeap::get_traceable(ptr).as_mut().finalize();
+            CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
             true
         } else {
             false
@@ -807,13 +810,20 @@ impl CcOnHeap<()> {
     }
 }
 
-// Trait used to make it possible to drop only the elem field of CcOnHeap
+// Trait used to make it possible to drop/finalize only the elem field of CcOnHeap
+// and without taking a &mut reference to the whole CcOnHeap
 trait InternalTrace: Trace {
+    fn finalize_elem(&self);
+
     /// Safety: see `drop_in_place`
     unsafe fn drop_elem(&self);
 }
 
 impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
+    fn finalize_elem(&self) {
+        unsafe { (*self.elem.get()).finalize(); }
+    }
+
     unsafe fn drop_elem(&self) {
         drop_in_place(self.elem.get());
     }
