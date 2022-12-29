@@ -3,9 +3,8 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ops::Deref;
-use std::ptr::{self, addr_of, addr_of_mut, drop_in_place, NonNull};
+use std::ptr::{self, drop_in_place, NonNull};
 use std::rc::Rc;
-
 #[cfg(feature = "nightly")]
 use std::{
     marker::Unsize,
@@ -72,7 +71,7 @@ impl<T: Trace + 'static> Cc<T> {
 
         unsafe {
             // Write the newly created T
-            invalid.as_mut().elem.write(f(&cc));
+            invalid.as_mut().elem.get_mut().write(f(&cc));
 
             // Set valid
             (*cc.inner().counter_marker()).mark(Mark::NonMarked);
@@ -107,7 +106,7 @@ impl<T: Trace + 'static> Cc<T> {
 
         // SAFETY: self is unique, valid and is not inside any list
         unsafe {
-            let t = ptr::read(addr_of!((*self.inner.as_ptr()).elem));
+            let t = ptr::read(self.inner().get_elem());
             let layout = self.inner().layout();
             cc_dealloc(self.inner, layout);
             mem::forget(self); // Don't call drop on this Cc
@@ -175,7 +174,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
         remove_from_list(self.inner.cast());
 
         unsafe {
-            self.inner.as_mut().elem.write(value);
+            self.inner.as_mut().elem.get_mut().write(value);
         }
 
         // The counter should not be updated since we're taking self
@@ -284,7 +283,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 
         remove_from_list(self.inner.cast());
         // We can do this since self is valid
-        &self.inner().elem
+        self.inner().get_elem()
     }
 }
 
@@ -292,14 +291,10 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
         #[inline(always)]
         fn counter_marker<T: ?Sized + Trace + 'static>(cc: &mut Cc<T>) -> &mut CounterMarker {
-            // SAFETY: it's always safe to access the counter_marker
-            unsafe {
-                // Accessing directly the counter_marker avoids stacked borrows UB, since self.inner is borrowed
-                // (uniquely) by CcOnHeap::drop_inner when calling drop_in_place (which calls this function).
-                // Accessing the counter_marker field doesn't cause UB since it is inside an UnsafeCell.
-                // (see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md)
-                (*addr_of_mut!((*cc.inner.as_ptr()).counter_marker)).get_mut()
-            }
+            // SAFETY: it's always safe to access the counter_marker.
+            //         The use of as_ref here is important, since it avoids creating a mutable reference
+            //         to cc.inner while cc.inner.elem might be being borrowed mutably by drop_in_place
+            unsafe { &mut *cc.inner.as_ref().counter_marker.get() }
         }
         let counter_marker = counter_marker(self);
 
@@ -340,7 +335,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     (*self.inner().counter_marker()).set_finalized(true);
                 }
 
-                self.inner_mut().elem.finalize();
+                self.inner_mut().elem.get_mut().finalize();
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
             } else {
@@ -351,7 +346,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 let _dropping_guard = replace_state_field!(dropping, true);
                 // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
                 unsafe {
-                    drop_in_place(self.inner.as_ptr());
+                    drop_in_place(self.inner().elem.get());
                     cc_dealloc(self.inner, layout);
                 }
                 // _dropping_guard is dropped here, resetting state.dropping
@@ -374,7 +369,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
         // SAFETY: we have just checked that self is valid
         unsafe {
             if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().elem.trace(ctx);
+                self.inner().get_elem().trace(ctx);
             }
         }
     }
@@ -388,15 +383,17 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
 
     #[cfg(feature = "nightly")]
-    vtable: DynMetadata<dyn Trace>,
+    vtable: DynMetadata<dyn InternalTrace>,
 
     #[cfg(not(feature = "nightly"))]
-    fat_ptr: NonNull<dyn Trace>,
+    fat_ptr: NonNull<dyn InternalTrace>,
 
     counter_marker: UnsafeCell<CounterMarker>,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
 
-    elem: T,
+    // This UnsafeCell is necessary, since we want to execute Drop::drop
+    // for elem but still have access to the other fields of CcOnHeap
+    elem: UnsafeCell<T>,
 }
 
 impl<T: Trace + 'static> CcOnHeap<T> {
@@ -412,12 +409,12 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
                     #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.as_ptr() as *mut dyn Trace),
+                    vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
                     #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn Trace),
+                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
                     counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one()),
                     _phantom: PhantomData,
-                    elem: t,
+                    elem: UnsafeCell::new(t),
                 },
             );
             ptr
@@ -443,10 +440,10 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
                     #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace),
+                    vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(
-                        ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn Trace
+                        ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace
                     ),
                     counter_marker: UnsafeCell::new({
                         let mut cm = CounterMarker::new_with_counter_to_one();
@@ -454,7 +451,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                         cm
                     }),
                     _phantom: PhantomData,
-                    elem: MaybeUninit::uninit(),
+                    elem: UnsafeCell::new(MaybeUninit::uninit()),
                 },
             );
             ptr
@@ -469,10 +466,9 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    #[cfg(test)]
-    pub(crate) fn get_elem_for_tests(&self) -> &T {
-        assert!(self.is_valid());
-        &self.elem
+    pub(crate) fn get_elem(&self) -> &T {
+        debug_assert!(self.is_valid());
+        unsafe { &*self.elem.get() }
     }
 
     #[inline]
@@ -548,7 +544,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
-        self.elem.trace(ctx);
+        self.get_elem().trace(ctx);
     }
 }
 
@@ -559,7 +555,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
-        self.elem.finalize();
+        self.elem.get_mut().finalize();
     }
 }
 
@@ -651,12 +647,12 @@ impl CcOnHeap<()> {
     ///         More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        drop_in_place(CcOnHeap::get_traceable(ptr).as_ptr());
+        CcOnHeap::get_traceable(ptr).as_mut().drop_elem();
     }
 
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
-    unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn Trace> {
+    unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
         debug_assert!(ptr.as_ref().is_valid()); // Just to be sure
 
         #[cfg(feature = "nightly")]
@@ -808,5 +804,17 @@ impl CcOnHeap<()> {
                 false
             },
         }
+    }
+}
+
+// Trait used to make it possible to drop only the elem field of CcOnHeap
+trait InternalTrace: Trace {
+    /// Safety: see `drop_in_place`
+    unsafe fn drop_elem(&self);
+}
+
+impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
+    unsafe fn drop_elem(&self) {
+        drop_in_place(self.elem.get());
     }
 }
