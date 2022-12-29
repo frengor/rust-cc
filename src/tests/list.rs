@@ -10,7 +10,7 @@ fn assert_contains(list: &List, mut elements: Vec<i32>) {
         // Test contains
         assert!(list.contains(ptr));
 
-        let elem = unsafe { *ptr.cast::<CcOnHeap<i32>>().as_ref().get_elem_for_tests() };
+        let elem = unsafe { *ptr.cast::<CcOnHeap<i32>>().as_ref().get_elem() };
         let index = elements.iter().position(|&i| i == elem);
         assert!(index.is_some(), "Couldn't find element {} in list.", elem);
         elements.swap_remove(index.unwrap());
@@ -36,12 +36,12 @@ fn deallocate(elements: Vec<NonNull<CcOnHeap<i32>>>) {
         assert!(
             (*ptr.as_ref().get_next()).is_none(),
             "{} has a next",
-            *ptr.as_ref().get_elem_for_tests()
+            *ptr.as_ref().get_elem()
         );
         assert!(
             (*ptr.as_ref().get_prev()).is_none(),
             "{} has a prev",
-            *ptr.as_ref().get_elem_for_tests()
+            *ptr.as_ref().get_elem()
         );
         dealloc(ptr.cast().as_ptr(), Layout::new::<CcOnHeap<i32>>());
     });
@@ -90,7 +90,7 @@ fn test_remove() {
                 "Removed element has still a prev."
             );
             assert_eq!(
-                *removed.as_ref().get_elem_for_tests(),
+                *removed.as_ref().get_elem(),
                 removed_i,
                 "Removed wrong element"
             );
