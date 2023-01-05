@@ -287,6 +287,68 @@ fn test_cyclic() {
 }
 
 #[test]
+fn test_cyclic_finalization_aliasing() {
+    reset_state();
+
+    struct Circular {
+        cc: Cc<Circular>,
+    }
+
+    unsafe impl Trace for Circular {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cc.trace(ctx);
+        }
+    }
+
+    impl Finalize for Circular {
+        // See comment below
+        #[allow(clippy::absurd_extreme_comparisons)]
+        #[allow(unused_comparisons)]
+        fn finalize(&mut self) {
+            // The scope of this comparison is to recursively access the same allocation during finalization
+            assert!(self.cc.cc.cc.cc.cc.strong_count() >= 0);
+        }
+    }
+
+    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
+        cc: Cc::new(Circular {
+            cc: cc.clone(),
+        }),
+    });
+    collect_cycles();
+}
+
+#[test]
+fn test_self_loop_finalization_aliasing() {
+    reset_state();
+
+    struct Circular {
+        cc: Cc<Circular>,
+    }
+
+    unsafe impl Trace for Circular {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cc.trace(ctx);
+        }
+    }
+
+    impl Finalize for Circular {
+        // See comment below
+        #[allow(clippy::absurd_extreme_comparisons)]
+        #[allow(unused_comparisons)]
+        fn finalize(&mut self) {
+            // The scope of this comparison is to recursively access the same allocation during finalization
+            assert!(self.cc.cc.cc.cc.strong_count() >= 0);
+        }
+    }
+
+    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
+        cc: cc.clone(),
+    });
+    collect_cycles();
+}
+
+#[test]
 fn test_assume_init() {
     reset_state();
 
