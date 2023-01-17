@@ -553,12 +553,12 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
 
 impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
     #[inline(always)]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         // This should never be called on an invalid instance.
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
-        self.elem.get_mut().finalize();
+        self.get_elem().finalize();
     }
 }
 

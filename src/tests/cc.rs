@@ -17,8 +17,7 @@ unsafe impl Trace for Circular {
     }
 }
 
-impl Finalize for Circular {
-}
+impl Finalize for Circular {}
 
 #[test]
 fn test_simple() {
@@ -161,7 +160,7 @@ fn test_trait_object() {
     }
 
     impl Finalize for MyTraitObject {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             FINALIZED.with(|finalized| finalized.set(true));
         }
     }
@@ -304,7 +303,7 @@ fn test_cyclic_finalization_aliasing() {
         // See comment below
         #[allow(clippy::absurd_extreme_comparisons)]
         #[allow(unused_comparisons)]
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
             assert!(self.cc.cc.cc.cc.cc.strong_count() >= 0);
         }
@@ -336,7 +335,7 @@ fn test_self_loop_finalization_aliasing() {
         // See comment below
         #[allow(clippy::absurd_extreme_comparisons)]
         #[allow(unused_comparisons)]
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
             assert!(self.cc.cc.cc.cc.strong_count() >= 0);
         }
