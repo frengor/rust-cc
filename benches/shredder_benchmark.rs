@@ -1,8 +1,9 @@
 //! Benchmarks adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
 use std::cell::RefCell;
+use std::hint::black_box;
 use criterion::criterion_group;
-use criterion::{black_box, criterion_main, Criterion};
+use criterion::{criterion_main, Criterion};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;

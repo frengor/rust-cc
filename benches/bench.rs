@@ -1,6 +1,7 @@
 use std::cell::RefCell;
+use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
+use criterion::{criterion_group, criterion_main, Criterion};
 use rust_cc::*;
 
 fn benchmark(c: &mut Criterion) {
