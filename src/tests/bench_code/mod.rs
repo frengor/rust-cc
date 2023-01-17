@@ -106,7 +106,7 @@ fn two() {
 fn build() -> Cc<A> {
     let root1 = Cc::new(A {
         c: RefCell::new(Some(Cc::new(C {
-            d: Some(Cc::new(D { _value: 0xD })),
+            d: RefCell::new(Some(Cc::new(D { _value: 0xD }))),
             b: Cc::new(B {
                 e: Cc::new(E { _value: 0xE }),
                 b: RefCell::new(None),
@@ -133,7 +133,7 @@ struct B {
     a: RefCell<Option<Cc<A>>>,
 }
 struct C {
-    d: Option<Cc<D>>,
+    d: RefCell<Option<Cc<D>>>,
     b: Cc<B>,
 }
 struct D {
@@ -168,7 +168,7 @@ unsafe impl Trace for B {
 
 unsafe impl Trace for C {
     fn trace(&self, ctx: &mut Context<'_>) {
-        if let Some(d) = &self.d {
+        if let Some(d) = &*self.d.borrow() {
             d.trace(ctx);
         }
         self.b.trace(ctx);
@@ -184,7 +184,7 @@ unsafe impl Trace for E {
 }
 
 impl Finalize for A {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         FREED_LIST.with(|str| {
             str.borrow_mut().push('A');
         });
@@ -192,7 +192,7 @@ impl Finalize for A {
 }
 
 impl Finalize for B {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         FREED_LIST.with(|str| {
             str.borrow_mut().push('B');
         });
@@ -200,7 +200,7 @@ impl Finalize for B {
 }
 
 impl Finalize for C {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         FREED_LIST.with(|str| {
             str.borrow_mut().push('C');
         });
@@ -213,7 +213,7 @@ impl Finalize for C {
 }
 
 impl Finalize for D {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         FREED_LIST.with(|str| {
             str.borrow_mut().push('D');
         });
@@ -221,7 +221,7 @@ impl Finalize for D {
 }
 
 impl Finalize for E {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         FREED_LIST.with(|str| {
             str.borrow_mut().push('E');
         });
