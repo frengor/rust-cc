@@ -74,7 +74,7 @@ unsafe impl Trace for Panicking {
 }
 
 impl Finalize for Panicking {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         if self.panic_on_finalize.get() {
             panic!("Test panic on Finalize");
         }
@@ -276,7 +276,7 @@ fn test_panicking_tracing_resurrecting() {
     }
 
     impl Finalize for Resurrecter {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             RESURRECTED.with(|res| res.set(Some(self.panicking.clone())));
         }
     }

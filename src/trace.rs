@@ -17,7 +17,7 @@ use crate::List;
 
 pub trait Finalize {
     #[inline(always)]
-    fn finalize(&mut self) {}
+    fn finalize(&self) {}
 }
 
 /// Trait to trace cycle-collectable objects.
@@ -283,7 +283,7 @@ unsafe impl<T> Trace for MaybeUninit<T> {
 impl<T> Finalize for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
-    fn finalize(&mut self) {}
+    fn finalize(&self) {}
 }
 
 unsafe impl<T> Trace for PhantomData<T> {
@@ -307,8 +307,8 @@ macro_rules! deref_trace {
         impl<$generic: $($bound)* $crate::trace::Finalize + 'static> $crate::trace::Finalize for $this
         {
             #[inline]
-            fn finalize(&mut self) {
-                let deref: &mut $generic = <$this as ::std::ops::DerefMut>::deref_mut(self);
+            fn finalize(&self) {
+                let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Finalize>::finalize(deref);
             }
         }
@@ -351,8 +351,8 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for RefCell<T> {
 
 impl<T: ?Sized + Finalize + 'static> Finalize for RefCell<T> {
     #[inline]
-    fn finalize(&mut self) {
-        if let Ok(mut borrow) = self.try_borrow_mut() {
+    fn finalize(&self) {
+        if let Ok(borrow) = self.try_borrow() {
             borrow.finalize();
         }
     }
@@ -369,7 +369,7 @@ unsafe impl<T: Trace + 'static> Trace for Option<T> {
 
 impl<T: Finalize + 'static> Finalize for Option<T> {
     #[inline]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         if let Some(value) = self {
             value.finalize();
         }
@@ -388,7 +388,7 @@ unsafe impl<R: Trace + 'static, E: Trace + 'static> Trace for Result<R, E> {
 
 impl<R: Finalize + 'static, E: Finalize + 'static> Finalize for Result<R, E> {
     #[inline]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         match self {
             Ok(value) => value.finalize(),
             Err(err) => err.finalize(),
@@ -407,7 +407,7 @@ unsafe impl<T: Trace + 'static, const N: usize> Trace for [T; N] {
 
 impl<T: Finalize + 'static, const N: usize> Finalize for [T; N] {
     #[inline]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         for elem in self {
             elem.finalize();
         }
@@ -425,7 +425,7 @@ unsafe impl<T: Trace + 'static> Trace for [T] {
 
 impl<T: Finalize + 'static> Finalize for [T] {
     #[inline]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         for elem in self {
             elem.finalize();
         }
@@ -443,7 +443,7 @@ unsafe impl<T: Trace + 'static> Trace for Vec<T> {
 
 impl<T: Finalize + 'static> Finalize for Vec<T> {
     #[inline]
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         for elem in self {
             elem.finalize();
         }
@@ -473,7 +473,7 @@ macro_rules! tuple_finalize_trace {
         where $($args: $crate::trace::Finalize + 'static),*
         {
             #[inline]
-            fn finalize(&mut self) {
+            fn finalize(&self) {
                 match self {
                     ($($args,)*) => {
                         $(

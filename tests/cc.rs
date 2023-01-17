@@ -135,13 +135,13 @@ fn test_finalization() {
     }
 
     impl Finalize for B {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             FINALIZEDB.with(|cell| cell.set(true));
         }
     }
 
     impl Finalize for A {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             FINALIZED.with(|cell| cell.set(true));
             if let Some(c) = self.c.upgrade() {
                 *c.a.borrow_mut() = Some(A {
@@ -286,13 +286,13 @@ fn test_finalize_drop() {
     }
 
     impl Finalize for A {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             FINALIZED.with(|cell| cell.set(true));
         }
     }
 
     impl Finalize for B {
-        fn finalize(&mut self) {
+        fn finalize(&self) {
             FINALIZEDB.with(|cell| cell.set(true));
         }
     }
@@ -344,8 +344,8 @@ fn test_finalize_drop() {
 #[test]
 fn finalization_test() {
     struct Circular {
-        next: Cc<Circular>,
-        does_finalization: bool,
+        next: RefCell<Cc<Circular>>,
+        does_finalization: Cell<bool>,
     }
 
     unsafe impl Trace for Circular {
@@ -355,24 +355,24 @@ fn finalization_test() {
     }
 
     impl Finalize for Circular {
-        fn finalize(&mut self) {
-            if self.does_finalization {
-                self.next = Cc::new(Circular {
+        fn finalize(&self) {
+            if self.does_finalization.get() {
+                *self.next.borrow_mut() = Cc::new(Circular {
                     next: self.next.clone(),
-                    does_finalization: false,
+                    does_finalization: Cell::new(false),
                 });
-                self.does_finalization = false;
+                self.does_finalization.set(false);
             }
         }
     }
 
     {
         let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-            next: Cc::new(Circular {
-                next: cc.clone(),
-                does_finalization: false,
-            }),
-            does_finalization: true,
+            next: RefCell::new(Cc::new(Circular {
+                next: RefCell::new(cc.clone()),
+                does_finalization: Cell::new(false),
+            })),
+            does_finalization: Cell::new(true),
         });
     }
     collect_cycles();

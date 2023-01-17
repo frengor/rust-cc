@@ -71,7 +71,7 @@ unsafe impl<T: Trace> Trace for Droppable<T> {
 }
 
 impl<T: Trace> Finalize for Droppable<T> {
-    fn finalize(&mut self) {
+    fn finalize(&self) {
         assert_finalizing();
         self.finalize.set(true);
     }

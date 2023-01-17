@@ -104,23 +104,23 @@ macro_rules! define_test {
         define_test!(fn $build_fn, $A, $B, $C, $D, $E);
 
         impl Finalize for $A {
-            fn finalize(&mut self) {}
+            fn finalize(&self) {}
         }
 
         impl Finalize for $B {
-            fn finalize(&mut self) {}
+            fn finalize(&self) {}
         }
 
         impl Finalize for $C {
-            fn finalize(&mut self) {}
+            fn finalize(&self) {}
         }
 
         impl Finalize for $D {
-            fn finalize(&mut self) {}
+            fn finalize(&self) {}
         }
 
         impl Finalize for $E {
-            fn finalize(&mut self) {}
+            fn finalize(&self) {}
         }
     };
 }
