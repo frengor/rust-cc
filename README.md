@@ -86,8 +86,9 @@ For example, a separate counter is used during tracing instead of decrementing t
 intrusive linked list is used instead of a vector for possible roots of cyclic garbage.  
 This makes the collector more resilient to random panics and failures in general.
 
-> **N.B.:** `rust-cc` is *not* an implementation of the algorithm proposed in the linked paper and it was never
-> intended to be so. The paper is linked only for reference to previous work.
+> **N.B.:** `rust-cc` is *not* an implementation of the algorithm proposed in the linked paper in Rust and it was never
+> intended to be so. The paper is linked only for reference to previous work and because there's no documentation about
+> the actual algorithm yet :upside_down_face:.
 
 Also, `rust-cc` cycle collector should be generally faster than mark-and-sweep garbage collectors on big (and fragmented)
 heaps, since there's no need to trace the whole heap every time it runs.
