@@ -365,3 +365,109 @@ fn test_init() {
     let cc = cc.init(42);
     assert_eq!(*cc, 42);
 }
+
+#[test]
+fn test_tracing_ref_cc() {
+    reset_state();
+
+    struct Panic(i32);
+
+    unsafe impl Trace for Panic {
+        fn trace(&self, _: &mut Context<'_>) {
+            panic!("Traced a &Cc<_>");
+        }
+    }
+
+    impl Finalize for Panic {}
+
+    let static_cc = Box::leak(Box::new(Cc::new(Panic(0)))) as *mut Cc<Panic>;
+
+    unsafe {
+        assert_eq!((*static_cc).strong_count(), 1);
+        assert_eq!((**static_cc).0, 0);
+    }
+
+    struct Circular {
+        reference: &'static Cc<Panic>,
+        cc: Cc<Circular>,
+    }
+
+    unsafe impl Trace for Circular {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            <&'static Cc<Panic> as Trace>::trace(&self.reference, ctx);
+            <Cc<Circular> as Trace>::trace(&self.cc, ctx);
+        }
+    }
+
+    impl Finalize for Circular {}
+
+    unsafe {
+        let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
+            reference: &*static_cc,
+            cc: cc.clone(),
+        });
+    }
+    collect_cycles();
+
+    unsafe {
+        // static_cc shouldn't have been dropped nor traced
+        assert_eq!((*static_cc).strong_count(), 1);
+        assert_eq!((**static_cc).0, 0);
+    }
+
+    // Deallocate static Cc to avoid miri complaints about memory leaks
+    let _ = unsafe { Box::from_raw(static_cc) };
+}
+
+#[test]
+fn test_tracing_mut_ref_cc() {
+    reset_state();
+
+    struct Panic(i32);
+
+    unsafe impl Trace for Panic {
+        fn trace(&self, _: &mut Context<'_>) {
+            panic!("Traced a &Cc<_>");
+        }
+    }
+
+    impl Finalize for Panic {}
+
+    let static_cc = Box::leak(Box::new(Cc::new(Panic(0)))) as *mut Cc<Panic>;
+
+    unsafe {
+        assert_eq!((*static_cc).strong_count(), 1);
+        assert_eq!((**static_cc).0, 0);
+    }
+
+    struct Circular {
+        reference: &'static mut Cc<Panic>,
+        cc: Cc<Circular>,
+    }
+
+    unsafe impl Trace for Circular {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            <&'static mut Cc<Panic> as Trace>::trace(&self.reference, ctx);
+            <Cc<Circular> as Trace>::trace(&self.cc, ctx);
+        }
+    }
+
+    impl Finalize for Circular {}
+
+    unsafe {
+        let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
+            reference: &mut *static_cc,
+            cc: cc.clone(),
+        });
+    }
+    collect_cycles();
+
+    unsafe {
+        // static_cc shouldn't have been dropped nor traced
+        assert_eq!((*static_cc).strong_count(), 1);
+        assert_eq!((**static_cc).0, 0);
+    }
+
+    // Deallocate static Cc to avoid miri complaints about memory leaks
+    let _ = unsafe { Box::from_raw(static_cc) };
+}

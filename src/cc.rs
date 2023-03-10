@@ -335,10 +335,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     (*self.inner().counter_marker()).set_finalized(true);
                 }
 
-                // SAFETY: inner is valid, so elem.get() can be dereferenced
-                unsafe {
-                    (*self.inner().elem.get()).finalize();
-                }
+                <T as Finalize>::finalize(self.inner().get_elem());
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
             } else {
@@ -372,13 +369,25 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
         // SAFETY: we have just checked that self is valid
         unsafe {
             if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().get_elem().trace(ctx);
+                <T as Trace>::trace(self.inner().get_elem(), ctx);
             }
         }
     }
 }
 
+unsafe impl<T: ?Sized + Trace + 'static> Trace for &Cc<T> {
+    #[inline(always)]
+    fn trace(&self, _: &mut Context<'_>) {}
+}
+
+unsafe impl<T: ?Sized + Trace + 'static> Trace for &mut Cc<T> {
+    #[inline(always)]
+    fn trace(&self, _: &mut Context<'_>) {}
+}
+
 impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
+impl<T: ?Sized + Trace + 'static> Finalize for &Cc<T> {}
+impl<T: ?Sized + Trace + 'static> Finalize for &mut Cc<T> {}
 
 #[repr(C)]
 pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
@@ -547,7 +556,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
-        self.get_elem().trace(ctx);
+        <T as Trace>::trace(self.get_elem(), ctx);
     }
 }
 
@@ -558,7 +567,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
         // The debug_assert should catch any bug related to this
         debug_assert!(self.is_valid());
 
-        self.get_elem().finalize();
+        <T as Finalize>::finalize(self.get_elem());
     }
 }
 
@@ -821,7 +830,7 @@ trait InternalTrace: Trace {
 
 impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
     fn finalize_elem(&self) {
-        unsafe { (*self.elem.get()).finalize(); }
+        <T as Finalize>::finalize(self.get_elem());
     }
 
     unsafe fn drop_elem(&self) {
