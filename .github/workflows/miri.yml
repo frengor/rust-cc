@@ -1,0 +1,25 @@
+name: Run Miri
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - name: Run tests
+        run: cargo miri test --verbose --workspace
+      - name: Run tests with every non-nightly feature
+        run: cargo miri test -F all-non-nightly --verbose --workspace
+      - name: Run tests with nightly feature
+        run: cargo miri test -F nightly --verbose --workspace
+      - name: Run tests with every feature
+        run: cargo miri test --all-features --verbose --workspace

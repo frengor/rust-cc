@@ -25,6 +25,7 @@ edition = "2021"
 
 [features]
 default = ["auto-collect"]
+all-non-nightly = ["auto-collect"]
 nightly = []
 auto-collect = []
 
