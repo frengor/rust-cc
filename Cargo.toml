@@ -1,22 +1,30 @@
 [package]
 name = "rust-cc"
 description = "A cycle collector for Rust programs"
+version.workspace = true
+authors.workspace = true
+readme = "README.md"
+repository.workspace = true
+categories.workspace = true
+keywords = ["cycle", "cycles", "collector", "garbage", "memory"]
+license.workspace = true
+edition.workspace = true
+
+[workspace]
+members = ["derive"]
+
+[workspace.package]
 version = "0.1.0"
 authors = ["fren_gor <goro@frengor.com>"]
-readme = "README.md"
 repository = "https://github.com/frengor/rust-cc"
 categories = ["memory-management"]
-keywords = ["garbage", "cycle", "cycles", "collector", "memory"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
-
-# For the moment avoid publishing the package
-publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default=["auto-collect"]
+default = ["auto-collect"]
 nightly = []
 auto-collect = []
 
