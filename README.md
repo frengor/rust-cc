@@ -77,21 +77,24 @@ fn main() {
 }
 ```
 
-## The algorithm
+## The collection algorithm
 
-The basic idea is similar to the one presented by D. F. Bacon and V.T. Rajan in ["Concurrent Cycle Collection
-in Reference Counted Systems"](https://pages.cs.wisc.edu/~cymen/misc/interests/Bacon01Concurrent.pdf),
-but the actual `rust-cc` algorithm is a little different.  
-For example, a separate counter is used during tracing instead of decrementing the reference counter itself and an
-intrusive linked list is used instead of a vector for possible roots of cyclic garbage.  
-This makes the collector more resilient to random panics and failures in general.
+The main idea is to discover the roots making use of the information contained in the reference counter,
+instead of having them from another source.  
 
-> **N.B.:** `rust-cc` is *not* an implementation of the algorithm proposed in the linked paper in Rust and it was never
-> intended to be so. The paper is linked only for reference to previous work and because there's no documentation about
-> the actual algorithm yet :upside_down_face:.
+Usually, in garbage collected languages, the runtime has always a way to know which objects are roots (i.e. objects 
+accessible from a pointer on the stack). However, since Rust has no runtime, this information isn't available. This way,
+garbage collectors implemented in Rust for Rust programs have a very difficult time figuring out which objects can be 
+deallocated and which cannot because they can still be accessed by the program.
 
-Also, `rust-cc` cycle collector should be generally faster than mark-and-sweep garbage collectors on big (and fragmented)
-heaps, since there's no need to trace the whole heap every time it runs.
+`rust-cc`, using the reference counters, is able to find the roots at runtime while collecting, eliminating the need to
+constantly keep track of the roots. This is also the reason why the standard `RefCell` can be safely used inside
+cycle collected objects for interior mutability.
+
+Moreover, the implemented cycle collector should be generally faster than mark-and-sweep garbage collectors on big 
+(and fragmented) heaps, since there's no need to trace the whole heap every time it runs.
+
+If you're interested in reading the source code, the algorithm is described more deeply in [CONTRIBUTING.md](./CONTRIBUTING.md#the-collection-algorithm).
 
 ## Benchmarks
 
