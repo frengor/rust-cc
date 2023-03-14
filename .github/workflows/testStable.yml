@@ -1,0 +1,26 @@
+name: Build and Test stable
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # Make sure to use the stable toolchain
+      - name: Use stable toolchain
+        uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: stable
+          override: true
+      - name: Build
+        run: cargo build --verbose --workspace
+      - name: Run tests
+        run: cargo test --verbose --workspace
+      - name: Build with every non-nightly feature
+        run: cargo build -F all-non-nightly --verbose --workspace
+      - name: Run tests with every non-nightly feature
+        run: cargo test -F all-non-nightly --verbose --workspace
