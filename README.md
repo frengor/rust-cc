@@ -8,6 +8,8 @@ immediately when the reference counter drops to zero.
 
 Currently, the cycle collector is not concurrent. As such, `Cc` doesn't implement `Send` nor `Sync`.
 
+This crate is currently in beta, so please report any bug you find.
+
 ## Example Usage
 
 ```rust
