@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      # From Miri documentation: https://github.com/rust-lang/miri#running-miri-on-ci
       - name: Install Miri
         run: |
           rustup toolchain install nightly --component miri
