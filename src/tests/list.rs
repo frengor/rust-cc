@@ -114,13 +114,13 @@ fn test_for_each_clearing_panic() {
 
     for it in &mut vec {
         unsafe {
-            (*it.as_ref().counter_marker()).mark(Mark::TraceCounting); // Just a random mark
+            it.as_ref().counter_marker().mark(Mark::TraceCounting); // Just a random mark
         }
     }
 
     let res = catch_unwind(AssertUnwindSafe(|| list.for_each_clearing(|ptr| {
         // Manually set mark for the first CcOnHeap, the others should be handled by for_each_clearing
-        unsafe { (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked) };
+        unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
 
         panic!("for_each_clearing panic");
     })));
@@ -129,7 +129,7 @@ fn test_for_each_clearing_panic() {
 
     for it in vec.iter() {
         fn counter_marker(it: &NonNull<CcOnHeap<i32>>) -> &CounterMarker {
-            unsafe { &*it.as_ref().counter_marker() }
+            unsafe { it.as_ref().counter_marker() }
         }
 
         let counter_marker = counter_marker(it);
