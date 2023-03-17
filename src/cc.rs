@@ -72,10 +72,10 @@ impl<T: Trace + 'static> Cc<T> {
         unsafe {
             // Write the newly created T
             invalid.as_mut().elem.get_mut().write(f(&cc));
-
-            // Set valid
-            (*cc.inner().counter_marker()).mark(Mark::NonMarked);
         }
+
+        // Set valid
+        cc.inner().counter_marker().mark(Mark::NonMarked);
 
         // Return cc, since it is now valid
         cc
@@ -97,7 +97,7 @@ impl<T: Trace + 'static> Cc<T> {
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            unsafe { !(*self.inner().counter_marker()).is_traced_or_invalid() },
+            !self.inner().counter_marker().is_traced_or_invalid(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
@@ -214,15 +214,12 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     pub fn finalize_again(&mut self) {
         assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
 
-        self.inner_mut().counter_marker.get_mut().set_finalized(false);
+        self.inner().counter_marker.set_finalized(false);
     }
 
     #[inline]
     pub fn already_finalized(&self) -> bool {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe {
-            !(*self.inner().counter_marker.get()).needs_finalization()
-        }
+        !self.inner().counter_marker.needs_finalization()
     }
 
     /// Note: don't access self.inner().elem if CcOnHeap is not valid!
@@ -234,7 +231,8 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     /// Note: don't access self.inner_mut().elem if CcOnHeap is not valid!
     #[inline(always)]
-    fn inner_mut(&mut self) -> &mut CcOnHeap<T> {
+    // Not currently used
+    fn _inner_mut(&mut self) -> &mut CcOnHeap<T> {
         // If Cc is alive then we can always access the underlying CcOnHeap
         unsafe { self.inner.as_mut() }
     }
@@ -290,11 +288,10 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
         #[inline(always)]
-        fn counter_marker<T: ?Sized + Trace + 'static>(cc: &mut Cc<T>) -> &mut CounterMarker {
-            // SAFETY: it's always safe to access the counter_marker.
-            //         The use of as_ref here is important, since it avoids creating a mutable reference
+        fn counter_marker<T: ?Sized + Trace + 'static>(cc: &mut Cc<T>) -> &CounterMarker {
+            // SAFETY: The use of as_ref here is important, since it avoids creating a mutable reference
             //         to cc.inner while cc.inner.elem might be being borrowed mutably by drop_in_place
-            unsafe { &mut *cc.inner.as_ref().counter_marker.get() }
+            unsafe { &cc.inner.as_ref().counter_marker }
         }
         let counter_marker = counter_marker(self);
 
@@ -330,10 +327,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 let _finalizing_guard = replace_state_field!(finalizing, true);
 
                 // Set finalized
-                // SAFETY: it's always safe to access the counter_marker
-                unsafe {
-                    (*self.inner().counter_marker()).set_finalized(true);
-                }
+                self.inner().counter_marker().set_finalized(true);
 
                 // SAFETY: inner is valid, so elem.get() can be dereferenced
                 unsafe {
@@ -391,7 +385,7 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     #[cfg(not(feature = "nightly"))]
     fat_ptr: NonNull<dyn InternalTrace>,
 
-    counter_marker: UnsafeCell<CounterMarker>,
+    counter_marker: CounterMarker,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
 
     // This UnsafeCell is necessary, since we want to execute Drop::drop
@@ -415,7 +409,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
-                    counter_marker: UnsafeCell::new(CounterMarker::new_with_counter_to_one()),
+                    counter_marker: CounterMarker::new_with_counter_to_one(),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
                 },
@@ -448,11 +442,11 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     fat_ptr: NonNull::new_unchecked(
                         ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace
                     ),
-                    counter_marker: UnsafeCell::new({
-                        let mut cm = CounterMarker::new_with_counter_to_one();
+                    counter_marker: {
+                        let cm = CounterMarker::new_with_counter_to_one();
                         cm.mark(Mark::Invalid);
                         cm
-                    }),
+                    },
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(MaybeUninit::uninit()),
                 },
@@ -465,7 +459,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
 impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     #[inline]
     pub(crate) fn is_valid(&self) -> bool {
-        unsafe { (*self.counter_marker()).is_valid() }
+        self.counter_marker().is_valid()
     }
 
     #[inline]
@@ -476,38 +470,33 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
     #[inline]
     pub(crate) fn get_counter(&self) -> u32 {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).counter() }
+        self.counter_marker().counter()
     }
 
     #[inline]
     pub(crate) fn get_tracing_counter(&self) -> u32 {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).tracing_counter() }
+        self.counter_marker().tracing_counter()
     }
 
     #[inline]
     pub(crate) fn increment_counter(&self) -> Result<(), OverflowError> {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).increment_counter() }
+        self.counter_marker().increment_counter()
     }
 
     #[inline]
     // Not currently used
     pub(crate) fn _decrement_counter(&self) -> Result<(), OverflowError> {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).decrement_counter() }
+        self.counter_marker().decrement_counter()
     }
 
     #[inline]
     pub(crate) fn increment_tracing_counter(&self) -> Result<(), OverflowError> {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).increment_tracing_counter() }
+        self.counter_marker().increment_tracing_counter()
     }
 
     #[inline]
-    pub(crate) fn counter_marker(&self) -> *mut CounterMarker {
-        self.counter_marker.get()
+    pub(crate) fn counter_marker(&self) -> &CounterMarker {
+        &self.counter_marker
     }
 
     #[inline]
@@ -525,8 +514,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 
     #[inline]
     pub(crate) fn needs_finalization(&self) -> bool {
-        // SAFETY: it's always safe to access the counter_marker
-        unsafe { (*self.counter_marker()).needs_finalization() }
+        self.counter_marker().needs_finalization()
     }
 
     #[inline]
@@ -567,7 +555,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
         // Check if ptr is in possible_cycles list. Note that if ptr points to an invalid CcOnHeap<_>,
         // then the if guard should never be true, since it is always marked as Mark::Invalid.
         // This is also the reason why this function is not marked as unsafe.
-        if (*ptr.as_ref().counter_marker()).is_in_possible_cycles() {
+        if ptr.as_ref().counter_marker().is_in_possible_cycles() {
             // ptr is in the list, remove it
             let _ = POSSIBLE_CYCLES.try_with(|pc| {
                 let mut list = pc.borrow_mut();
@@ -575,7 +563,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
                 debug_assert!(list.contains(ptr));
 
                 list.remove(ptr);
-                (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
+                ptr.as_ref().counter_marker().mark(Mark::NonMarked);
             });
         } else {
             // ptr is not in the list
@@ -599,7 +587,7 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
         let mut list = pc.borrow_mut();
         // Check if ptr is in possible_cycles list since we have to move it at its start
-        if (*ptr.as_ref().counter_marker()).is_in_possible_cycles() {
+        if ptr.as_ref().counter_marker().is_in_possible_cycles() {
             // Confirm is_in_possible_cycles() in debug builds
             debug_assert!(list.contains(ptr));
 
@@ -608,10 +596,10 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
         } else {
             // Confirm !is_in_possible_cycles() in debug builds
             debug_assert!(!list.contains(ptr));
-            debug_assert!((*ptr.as_ref().counter_marker()).is_not_marked());
+            debug_assert!(ptr.as_ref().counter_marker().is_not_marked());
 
             // Mark it
-            (*ptr.as_ref().counter_marker()).mark(Mark::PossibleCycles);
+            ptr.as_ref().counter_marker().mark(Mark::PossibleCycles);
         }
         // Add to the list
         //
@@ -634,9 +622,8 @@ impl CcOnHeap<()> {
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
         if ptr.as_ref().needs_finalization() {
             // Set finalized
-            // SAFETY: it's always safe to access the counter_marker
             unsafe {
-                (*ptr.as_ref().counter_marker()).set_finalized(true);
+                ptr.as_ref().counter_marker().set_finalized(true);
             }
 
             CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
@@ -683,16 +670,16 @@ impl CcOnHeap<()> {
                 root_list.add(ptr);
 
                 // Reset trace_counter
-                (*counter_marker).reset_tracing_counter();
+                counter_marker.reset_tracing_counter();
 
                 // Element is surely not already marked, marking
-                (*counter_marker).mark(Mark::TraceCounting);
+                counter_marker.mark(Mark::TraceCounting);
             },
             ContextInner::RootTracing { .. } => {
                 // ptr is into root_list
 
                 // Element is not already marked, marking
-                (*counter_marker).mark(Mark::TraceRoots);
+                counter_marker.mark(Mark::TraceRoots);
             },
         }
 
@@ -724,24 +711,22 @@ impl CcOnHeap<()> {
                 non_root_list,
             } => {
                 #[inline(always)]
-                unsafe fn non_root(counter_marker: *mut CounterMarker) -> bool {
-                    (*counter_marker).tracing_counter() == (*counter_marker).counter()
+                fn non_root(counter_marker: &CounterMarker) -> bool {
+                    counter_marker.tracing_counter() == counter_marker.counter()
                 }
 
-                if !(*counter_marker).is_marked_trace_counting() {
+                if !counter_marker.is_marked_trace_counting() {
                     // Not already marked
 
                     // Make sure ptr is not in POSSIBLE_CYCLES list
                     remove_from_list(ptr);
 
-                    (*counter_marker).reset_tracing_counter();
-                    let res = (*counter_marker).increment_tracing_counter();
+                    counter_marker.reset_tracing_counter();
+                    let res = counter_marker.increment_tracing_counter();
                     debug_assert!(res.is_ok());
 
                     // Check invariant (tracing_counter is always less or equal to counter)
-                    debug_assert!(
-                        (*counter_marker).tracing_counter() <= (*counter_marker).counter()
-                    );
+                    debug_assert!(counter_marker.tracing_counter() <= counter_marker.counter());
 
                     if non_root(counter_marker) {
                         non_root_list.add(ptr);
@@ -751,18 +736,16 @@ impl CcOnHeap<()> {
 
                     // Marking here since the previous debug_asserts might panic
                     // before ptr is actually added to root_list or non_root_list
-                    (*counter_marker).mark(Mark::TraceCounting);
+                    counter_marker.mark(Mark::TraceCounting);
 
                     // Continue tracing
                     true
                 } else {
                     // Check counters invariant (tracing_counter is always less or equal to counter)
                     // Only < is used here since tracing_counter will be incremented (by 1)
-                    debug_assert!(
-                        (*counter_marker).tracing_counter() < (*counter_marker).counter()
-                    );
+                    debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
 
-                    let res = (*counter_marker).increment_tracing_counter();
+                    let res = counter_marker.increment_tracing_counter();
                     debug_assert!(res.is_ok());
 
                     if non_root(counter_marker) {
@@ -776,19 +759,19 @@ impl CcOnHeap<()> {
                 }
             },
             ContextInner::RootTracing { non_root_list } => {
-                if !(*counter_marker).is_marked_trace_roots() {
-                    if !(*counter_marker).is_marked_trace_counting() {
+                if !counter_marker.is_marked_trace_roots() {
+                    if !counter_marker.is_marked_trace_counting() {
                         // This CcOnHeap hasn't been traced during trace counting, so
                         // don't trace it now since it will surely not be deallocated
                         return false;
                     }
 
-                    if (*counter_marker).tracing_counter() < (*counter_marker).counter() {
+                    if counter_marker.tracing_counter() < counter_marker.counter() {
                         // If ptr is a root then stop tracing, since it will be handled
                         // at the next iteration of start_tracing
 
                         // Avoids tracing this CcOnHeap again
-                        (*counter_marker).mark(Mark::TraceRoots);
+                        counter_marker.mark(Mark::TraceRoots);
                         return false;
                     }
 
@@ -797,7 +780,7 @@ impl CcOnHeap<()> {
                     // will avoid tracing this CcOnHeap again, thanks to the 2 nested ifs above: at the
                     // next iteration this CcOnHeap won't be marked neither TraceRoots nor TraceCounting,
                     // so this function will return false and no tracing will happen
-                    (*counter_marker).mark(Mark::NonMarked);
+                    counter_marker.mark(Mark::NonMarked);
                     non_root_list.remove(ptr);
 
                     // Continue root tracing

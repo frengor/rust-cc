@@ -89,8 +89,9 @@ fn collect() {
             if let Some(first) = pc.first() {
                 pc.remove(first);
 
-                // SAFETY: it's always safe to access the counter_marker
-                unsafe { (*first.as_ref().counter_marker()).mark(Mark::NonMarked) }; // Keep invariant
+                unsafe {
+                    first.as_ref().counter_marker().mark(Mark::NonMarked); // Keep invariant
+                }
 
                 Some(first)
             } else {
@@ -108,10 +109,9 @@ fn collect() {
 
             trace_roots(&mut root_list, &mut non_root_list);
 
-            // SAFETY: it's always safe to access the counter_marker
             root_list.for_each_clearing(|ptr| unsafe {
                 // Reset mark
-                (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
+                ptr.as_ref().counter_marker().mark(Mark::NonMarked);
 
                 debug_assert_ne!(
                     ptr.as_ref().get_tracing_counter(),
@@ -120,13 +120,12 @@ fn collect() {
             });
 
             if !non_root_list.is_empty() {
-                // SAFETY: it's always safe to access the counter_marker
                 non_root_list.for_each(|ptr| unsafe {
                     debug_assert_eq!(
                         ptr.as_ref().get_tracing_counter(),
                         ptr.as_ref().get_counter()
                     );
-                    (*ptr.as_ref().counter_marker()).mark(Mark::TraceRoots);
+                    ptr.as_ref().counter_marker().mark(Mark::TraceRoots);
                 });
 
                 let mut has_finalized = false;
@@ -153,9 +152,8 @@ fn collect() {
                     POSSIBLE_CYCLES.with(|pc| {
                         let mut pc = pc.borrow_mut();
                         non_root_list.for_each_clearing(|ptr| {
-                            // SAFETY: it's always safe to access the counter_marker
                             unsafe {
-                                (*ptr.as_ref().counter_marker()).mark(Mark::PossibleCycles);
+                                ptr.as_ref().counter_marker().mark(Mark::PossibleCycles);
                             }
                             pc.add(ptr);
                         });
