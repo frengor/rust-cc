@@ -3,7 +3,8 @@
 Feel free to open issues or pull requests. Feature requests can be done opening an issue, the enhancement tag will be applied by maintainers.
 
 For pull requests, use [rustftm](https://github.com/rust-lang/rustfmt) to format your files and make sure to
-[allow edits by maintainers](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/allowing-changes-to-a-pull-request-branch-created-from-a-fork).
+[allow edits by maintainers](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/allowing-changes-to-a-pull-request-branch-created-from-a-fork).  
+Also, remember to open the pull requests toward the `dev` branch. The `main` branch is only for releases!
 
 ## The collection algorithm
 
