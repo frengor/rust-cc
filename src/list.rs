@@ -130,7 +130,7 @@ impl Drop for List {
             fn remove_elem(ptr: NonNull<CcOnHeap<()>>) -> Option<NonNull<CcOnHeap<()>>> {
                 unsafe {
                     // Reset the mark to avoid having an inconsistent CcOnHeap
-                    (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
+                    ptr.as_ref().counter_marker().mark(Mark::NonMarked);
                     let next = *ptr.as_ref().get_next();
                     *ptr.as_ref().get_next() = None;
                     *ptr.as_ref().get_prev() = None;

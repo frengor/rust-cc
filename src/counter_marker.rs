@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use crate::utils;
 
 const NON_MARKED: u32 = 0u32;
@@ -32,10 +34,10 @@ const MAX: u32 = COUNTER_MASK;
 /// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
 /// * `D` is the counter (last one for sum/subtraction efficiency)
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[repr(transparent)]
 pub(crate) struct CounterMarker {
-    counter: u32,
+    counter: Cell<u32>,
 }
 
 pub(crate) struct OverflowError;
@@ -45,87 +47,87 @@ impl CounterMarker {
     #[must_use]
     pub(crate) fn new_with_counter_to_one() -> CounterMarker {
         CounterMarker {
-            counter: INITIAL_VALUE,
+            counter: Cell::new(INITIAL_VALUE),
         }
     }
 
     #[inline]
-    pub(crate) fn increment_counter(&mut self) -> Result<(), OverflowError> {
+    pub(crate) fn increment_counter(&self) -> Result<(), OverflowError> {
         if self.counter() == MAX {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
         } else {
-            self.counter += 1;
+            self.counter.set(self.counter.get() + 1);
             Ok(())
         }
     }
 
     #[inline]
-    pub(crate) fn decrement_counter(&mut self) -> Result<(), OverflowError> {
+    pub(crate) fn decrement_counter(&self) -> Result<(), OverflowError> {
         if self.counter() == 0 {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
         } else {
-            self.counter -= 1;
+            self.counter.set(self.counter.get() - 1);
             Ok(())
         }
     }
 
     #[inline]
-    pub(crate) fn increment_tracing_counter(&mut self) -> Result<(), OverflowError> {
+    pub(crate) fn increment_tracing_counter(&self) -> Result<(), OverflowError> {
         if self.tracing_counter() == MAX {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
         } else {
             // Increment trace_counter and not counter
-            self.counter += 1u32 << 14;
+            self.counter.set(self.counter.get() + (1u32 << 14));
             Ok(())
         }
     }
 
     #[inline]
-    pub(crate) fn _decrement_tracing_counter(&mut self) -> Result<(), OverflowError> {
+    pub(crate) fn _decrement_tracing_counter(&self) -> Result<(), OverflowError> {
         if self.tracing_counter() == 0 {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
         } else {
             // Decrement trace_counter and not counter
-            self.counter -= 1u32 << 14;
+            self.counter.set(self.counter.get() - (1u32 << 14));
             Ok(())
         }
     }
 
     #[inline]
     pub(crate) fn counter(&self) -> u32 {
-        self.counter & COUNTER_MASK
+        self.counter.get() & COUNTER_MASK
     }
 
     #[inline]
     pub(crate) fn tracing_counter(&self) -> u32 {
-        (self.counter & TRACING_COUNTER_MASK) >> 14
+        (self.counter.get() & TRACING_COUNTER_MASK) >> 14
     }
 
     #[inline]
-    pub(crate) fn reset_tracing_counter(&mut self) {
-        self.counter &= !TRACING_COUNTER_MASK;
+    pub(crate) fn reset_tracing_counter(&self) {
+        self.counter.set(self.counter.get() & !TRACING_COUNTER_MASK);
     }
 
     #[inline]
     pub(crate) fn is_in_possible_cycles(&self) -> bool {
-        (self.counter & BITS_MASK) == IN_POSSIBLE_CYCLES
+        (self.counter.get() & BITS_MASK) == IN_POSSIBLE_CYCLES
     }
 
     #[inline]
     pub(crate) fn needs_finalization(&self) -> bool {
-        (self.counter & FINALIZED_MASK) == 0u32
+        (self.counter.get() & FINALIZED_MASK) == 0u32
     }
 
     #[inline]
-    pub(crate) fn set_finalized(&mut self, finalized: bool) {
+    pub(crate) fn set_finalized(&self, finalized: bool) {
         if finalized {
-            self.counter |= FINALIZED_MASK;
+            self.counter.set(self.counter.get() | FINALIZED_MASK);
         } else {
-            self.counter &= !FINALIZED_MASK;
+            self.counter.set(self.counter.get() & !FINALIZED_MASK);
         }
     }
 
@@ -133,7 +135,7 @@ impl CounterMarker {
     pub(crate) fn is_not_marked(&self) -> bool {
         // true if (self.counter & BITS_MASK) is equal to 001 or 000,
         // so if the first two bits are both 0
-        (self.counter & FIRST_TWO_BITS_MASK) == 0u32
+        (self.counter.get() & FIRST_TWO_BITS_MASK) == 0u32
     }
 
     /// Returns whether this CounterMarker is traced or not valid (exclusive or).
@@ -141,27 +143,27 @@ impl CounterMarker {
     pub(crate) fn is_traced_or_invalid(&self) -> bool {
         // true if (self.counter & BITS_MASK) is equal to 010, 011, 100, 101 or 111,
         // so if the first two bits aren't both 0
-        (self.counter & FIRST_TWO_BITS_MASK) != 0u32
+        (self.counter.get() & FIRST_TWO_BITS_MASK) != 0u32
     }
 
     #[inline]
     pub(crate) fn is_marked_trace_counting(&self) -> bool {
-        (self.counter & BITS_MASK) == TRACING_COUNTING_MARKED
+        (self.counter.get() & BITS_MASK) == TRACING_COUNTING_MARKED
     }
 
     #[inline]
     pub(crate) fn is_marked_trace_roots(&self) -> bool {
-        (self.counter & BITS_MASK) == TRACING_ROOTS_MARKED
+        (self.counter.get() & BITS_MASK) == TRACING_ROOTS_MARKED
     }
 
     #[inline]
     pub(crate) fn is_valid(&self) -> bool {
-        (self.counter & BITS_MASK) != INVALID
+        (self.counter.get() & BITS_MASK) != INVALID
     }
 
     #[inline]
-    pub(crate) fn mark(&mut self, new_mark: Mark) {
-        self.counter = (self.counter & !BITS_MASK) | (new_mark as u32);
+    pub(crate) fn mark(&self, new_mark: Mark) {
+        self.counter.set((self.counter.get() & !BITS_MASK) | (new_mark as u32));
     }
 }
 
