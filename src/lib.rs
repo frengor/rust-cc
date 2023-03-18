@@ -109,23 +109,27 @@ fn collect() {
 
             trace_roots(&mut root_list, &mut non_root_list);
 
-            root_list.for_each_clearing(|ptr| unsafe {
+            root_list.for_each_clearing(|ptr| {
+                let counter_marker = unsafe { ptr.as_ref().counter_marker() };
+
                 // Reset mark
-                ptr.as_ref().counter_marker().mark(Mark::NonMarked);
+                counter_marker.mark(Mark::NonMarked);
 
                 debug_assert_ne!(
-                    ptr.as_ref().get_tracing_counter(),
-                    ptr.as_ref().get_counter()
+                    counter_marker.tracing_counter(),
+                    counter_marker.counter()
                 );
             });
 
             if !non_root_list.is_empty() {
-                non_root_list.for_each(|ptr| unsafe {
+                non_root_list.for_each(|ptr| {
+                    let counter_marker = unsafe { ptr.as_ref().counter_marker() };
+
                     debug_assert_eq!(
-                        ptr.as_ref().get_tracing_counter(),
-                        ptr.as_ref().get_counter()
+                        counter_marker.tracing_counter(),
+                        counter_marker.counter()
                     );
-                    ptr.as_ref().counter_marker().mark(Mark::TraceRoots);
+                    counter_marker.mark(Mark::TraceRoots);
                 });
 
                 let mut has_finalized = false;

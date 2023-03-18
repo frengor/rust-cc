@@ -12,7 +12,7 @@ use std::{
     ptr::{metadata, DynMetadata},
 };
 
-use crate::counter_marker::{CounterMarker, Mark, OverflowError};
+use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
@@ -196,7 +196,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        self.inner().get_counter()
+        self.inner().counter_marker().counter()
     }
 
     #[inline]
@@ -214,12 +214,12 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     pub fn finalize_again(&mut self) {
         assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
 
-        self.inner().counter_marker.set_finalized(false);
+        self.inner().counter_marker().set_finalized(false);
     }
 
     #[inline]
     pub fn already_finalized(&self) -> bool {
-        !self.inner().counter_marker.needs_finalization()
+        !self.inner().counter_marker().needs_finalization()
     }
 
     /// Note: don't access self.inner().elem if CcOnHeap is not valid!
@@ -246,7 +246,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
             panic!("Cannot clone while tracing!");
         }
 
-        if self.inner().increment_counter().is_err() {
+        if self.inner().counter_marker().increment_counter().is_err() {
             panic!("Too many references has been created to a single Cc");
         }
 
@@ -254,7 +254,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
         // avoids the need to check whether state(|state| state.is_finalizing()) is true.
         // The result is discarded since the tracing counter may be greater than the counter,
         // however it is correct (i.e. equals to the counter) during finalization
-        let _ = self.inner().increment_tracing_counter();
+        let _ = self.inner().counter_marker().increment_tracing_counter();
 
         remove_from_list(self.inner.cast());
 
@@ -287,13 +287,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
-        #[inline(always)]
-        fn counter_marker<T: ?Sized + Trace + 'static>(cc: &mut Cc<T>) -> &CounterMarker {
-            // SAFETY: The use of as_ref here is important, since it avoids creating a mutable reference
-            //         to cc.inner while cc.inner.elem might be being borrowed mutably by drop_in_place
-            unsafe { &cc.inner.as_ref().counter_marker }
-        }
-        let counter_marker = counter_marker(self);
+        let counter_marker = self.inner().counter_marker();
 
         // Always decrement the counter
         let res = counter_marker.decrement_counter();
@@ -321,18 +315,13 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             remove_from_list(self.inner.cast());
 
-            let layout = self.inner().layout();
-
-            let to_drop = if self.inner().needs_finalization() {
+            let to_drop = if counter_marker.needs_finalization() {
                 let _finalizing_guard = replace_state_field!(finalizing, true);
 
                 // Set finalized
-                self.inner().counter_marker().set_finalized(true);
+                counter_marker.set_finalized(true);
 
-                // SAFETY: inner is valid, so elem.get() can be dereferenced
-                unsafe {
-                    (*self.inner().elem.get()).finalize();
-                }
+                self.inner().get_elem().finalize();
                 self.strong_count() == 0
                 // _finalizing_guard is dropped here, resetting state.finalizing
             } else {
@@ -341,6 +330,8 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             if to_drop {
                 let _dropping_guard = replace_state_field!(dropping, true);
+                let layout = self.inner().layout();
+
                 // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
                 unsafe {
                     drop_in_place(self.inner().elem.get());
@@ -469,32 +460,6 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    pub(crate) fn get_counter(&self) -> u32 {
-        self.counter_marker().counter()
-    }
-
-    #[inline]
-    pub(crate) fn get_tracing_counter(&self) -> u32 {
-        self.counter_marker().tracing_counter()
-    }
-
-    #[inline]
-    pub(crate) fn increment_counter(&self) -> Result<(), OverflowError> {
-        self.counter_marker().increment_counter()
-    }
-
-    #[inline]
-    // Not currently used
-    pub(crate) fn _decrement_counter(&self) -> Result<(), OverflowError> {
-        self.counter_marker().decrement_counter()
-    }
-
-    #[inline]
-    pub(crate) fn increment_tracing_counter(&self) -> Result<(), OverflowError> {
-        self.counter_marker().increment_tracing_counter()
-    }
-
-    #[inline]
     pub(crate) fn counter_marker(&self) -> &CounterMarker {
         &self.counter_marker
     }
@@ -510,11 +475,6 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
         unsafe {
             Layout::for_value(self.fat_ptr.as_ref())
         }
-    }
-
-    #[inline]
-    pub(crate) fn needs_finalization(&self) -> bool {
-        self.counter_marker().needs_finalization()
     }
 
     #[inline]
@@ -620,11 +580,9 @@ impl CcOnHeap<()> {
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
-        if ptr.as_ref().needs_finalization() {
+        if ptr.as_ref().counter_marker().needs_finalization() {
             // Set finalized
-            unsafe {
-                ptr.as_ref().counter_marker().set_finalized(true);
-            }
+            ptr.as_ref().counter_marker().set_finalized(true);
 
             CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
             true
@@ -804,7 +762,7 @@ trait InternalTrace: Trace {
 
 impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
     fn finalize_elem(&self) {
-        unsafe { (*self.elem.get()).finalize(); }
+        self.get_elem().finalize();
     }
 
     unsafe fn drop_elem(&self) {
