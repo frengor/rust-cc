@@ -520,6 +520,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
             let _ = POSSIBLE_CYCLES.try_with(|pc| {
                 let mut list = pc.borrow_mut();
                 // Confirm is_in_possible_cycles() in debug builds
+                #[cfg(feature = "pedantic-debug-assertions")]
                 debug_assert!(list.contains(ptr));
 
                 list.remove(ptr);
@@ -530,6 +531,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 
             // Confirm !is_in_possible_cycles() in debug builds.
             // This is safe to do since we're not putting the CcOnHeap into the list
+            #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert! {
                 POSSIBLE_CYCLES.try_with(|pc| {
                     !pc.borrow().contains(ptr)
@@ -549,12 +551,14 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
         // Check if ptr is in possible_cycles list since we have to move it at its start
         if ptr.as_ref().counter_marker().is_in_possible_cycles() {
             // Confirm is_in_possible_cycles() in debug builds
+            #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(list.contains(ptr));
 
             list.remove(ptr);
             // In this case we don't need to update the mark since we put it back into the list
         } else {
             // Confirm !is_in_possible_cycles() in debug builds
+            #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(!list.contains(ptr));
             debug_assert!(ptr.as_ref().counter_marker().is_not_marked());
 

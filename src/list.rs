@@ -108,6 +108,7 @@ impl List {
     }
 
     #[inline]
+    #[allow(unused)]
     pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
         let mut current = self.first;
         while let Some(current_ptr) = current {
