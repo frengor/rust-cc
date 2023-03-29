@@ -1,9 +1,10 @@
-name: Build and Test nightly
+name: Build and Test
 
 on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   build:
@@ -12,13 +13,13 @@ jobs:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
       - name: Build
-        run: cargo build --verbose --workspace
+        run: cargo build -F pedantic-debug-assertions --verbose --workspace
       - name: Run tests
-        run: cargo test --verbose --workspace
-      - name: Build with nightly feature
-        run: cargo build -F nightly --verbose --workspace
-      - name: Run tests with nightly feature
-        run: cargo test -F nightly --verbose --workspace
+        run: cargo test -F pedantic-debug-assertions --verbose --workspace
+      - name: Build full
+        run: cargo build -F full,pedantic-debug-assertions --verbose --workspace
+      - name: Run full tests
+        run: cargo test -F full,pedantic-debug-assertions --verbose --workspace
       - name: Build with every feature
         run: cargo build --all-features --verbose --workspace
       - name: Run tests with every feature
