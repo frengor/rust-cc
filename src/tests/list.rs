@@ -141,3 +141,20 @@ fn test_for_each_clearing_panic() {
 
     deallocate(vec);
 }
+
+#[test]
+fn test_list_moving() {
+    let mut list = List::new();
+    let cc = CcOnHeap::new_for_tests(5i32);
+    list.add(cc.cast());
+
+    let list_moved = list;
+
+    list_moved.for_each_clearing(|elem| unsafe {
+        assert_eq!(*elem.cast::<CcOnHeap<i32>>().as_ref().get_elem(), 5i32);
+    });
+
+    unsafe {
+        dealloc(cc.cast().as_ptr(), Layout::new::<CcOnHeap<i32>>());
+    }
+}
