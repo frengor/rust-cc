@@ -6,7 +6,7 @@ use crate::{CcOnHeap, List, Mark};
 use crate::counter_marker::CounterMarker;
 
 fn assert_contains(list: &List, mut elements: Vec<i32>) {
-    list.for_each(|ptr| {
+    list.iter().for_each(|ptr| {
         // Test contains
         assert!(list.contains(ptr));
 
@@ -65,7 +65,7 @@ fn test_add() {
 
     assert_contains(&list, vec);
 
-    list.for_each_clearing(|_| {}); // Clear the list
+    drop(list);
     deallocate(elements);
 }
 
@@ -97,7 +97,7 @@ fn test_remove() {
         }
 
         assert_contains(&list, elements);
-        list.for_each_clearing(|_| {}); // Clear the list
+        drop(list);
         deallocate(vec);
     }
 
@@ -118,11 +118,11 @@ fn test_for_each_clearing_panic() {
         }
     }
 
-    let res = catch_unwind(AssertUnwindSafe(|| list.for_each_clearing(|ptr| {
-        // Manually set mark for the first CcOnHeap, the others should be handled by for_each_clearing
+    let res = catch_unwind(AssertUnwindSafe(|| list.into_iter().for_each(|ptr| {
+        // Manually set mark for the first CcOnHeap, the others should be handled by List::drop
         unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
 
-        panic!("for_each_clearing panic");
+        panic!("into_iter().for_each panic");
     })));
 
     assert!(res.is_err(), "Hasn't panicked.");
@@ -150,7 +150,7 @@ fn test_list_moving() {
 
     let list_moved = list;
 
-    list_moved.for_each_clearing(|elem| unsafe {
+    list_moved.into_iter().for_each(|elem| unsafe {
         assert_eq!(*elem.cast::<CcOnHeap<i32>>().as_ref().get_elem(), 5i32);
     });
 
