@@ -14,6 +14,7 @@ impl List {
     }
 
     #[inline]
+    #[cfg(test)] // Only used in tests
     pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
         self.first
     }
