@@ -110,6 +110,7 @@ fn collect() {
                 counter_marker.tracing_counter(),
                 counter_marker.counter()
             );
+            debug_assert!(counter_marker.is_marked_trace_roots());
         });
     }
 
@@ -122,6 +123,7 @@ fn collect() {
                 counter_marker.tracing_counter(),
                 counter_marker.counter()
             );
+            debug_assert!(counter_marker.is_marked_trace_counting());
         });
 
         let mut has_finalized = false;
