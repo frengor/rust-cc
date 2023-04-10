@@ -1,0 +1,58 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types: [labeled]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  bench:
+    if: contains(github.event.pull_request.labels.*.name, 'run benchmarks')
+    permissions:
+      pull-requests: write
+    env:
+      WORKSPACE: ${{ github.workspace }}
+      URL: ${{ github.event.pull_request.comments_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Bench base branch
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          cargo update
+          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____old_results.txt
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          clean: false
+      - name: Bench head branch
+        run: |
+          cargo update
+          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____results.txt
+      - name: Write comment
+        run: |
+          {
+            echo '<strong>Benchmark results:</strong>'
+            echo ''
+            cat "${WORKSPACE}"/____results.txt
+            echo ''
+            echo '<details><summary><strong>Old results:</strong></summary><p>'
+            echo ''
+            cat "${WORKSPACE}"/____old_results.txt
+            echo '</p></details>'
+          } > "${WORKSPACE}"/__result.txt
+      - uses: thollander/actions-comment-pull-request@v2.3.1
+        with:
+          filePath: '__result.txt'
+          mode: recreate
+      - name: Remove label
+        uses: actions-ecosystem/action-remove-labels@v1.3.0
+        with:
+          labels: "run benchmarks"
