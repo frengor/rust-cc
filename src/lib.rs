@@ -2,6 +2,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
+use std::mem;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
@@ -175,7 +176,7 @@ fn deallocate_list(to_deallocate_list: List) {
         // Don't deallocate now since next drop_inner calls will probably access this object while executing drop glues
     });
 
-    to_deallocate_list.into_iter().for_each(|ptr| {
+    to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr.as_ref().elem is never read or written (only the layout information is read)
         //         and then the allocation gets deallocated immediately after
         unsafe {
@@ -183,6 +184,9 @@ fn deallocate_list(to_deallocate_list: List) {
             cc_dealloc(ptr, layout);
         }
     });
+
+    // Don't remove the mark from dropped CcOnHeaps
+    mem::forget(to_deallocate_list);
 
     // _dropping_guard is dropped here, resetting state.dropping
 }
