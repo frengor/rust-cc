@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::mem;
 use std::ptr::NonNull;
 
 use crate::{CcOnHeap, Mark};
@@ -113,8 +114,32 @@ impl List {
     }
 
     #[inline]
+    #[cfg(test)] // Only used in tests
     pub(crate) fn into_iter(self) -> ListIter {
         <Self as IntoIterator>::into_iter(self)
+    }
+
+    /// The elements in `to_append` are assumed to be already marked with `mark` mark.
+    #[inline]
+    pub(crate) fn mark_self_and_append(&mut self, mark: Mark, to_append: List) {
+        if let Some(mut prev) = self.first {
+            for elem in self.iter() {
+                unsafe {
+                    elem.as_ref().counter_marker().mark(mark);
+                }
+                prev = elem;
+            }
+            unsafe {
+                *prev.as_ref().get_next() = to_append.first;
+                if let Some(ptr) = to_append.first {
+                    *ptr.as_ref().get_prev() = Some(prev);
+                }
+            }
+        } else {
+            self.first = to_append.first;
+            // to_append.first.prev is already None
+        }
+        mem::forget(to_append); // Don't run to_append destructor
     }
 }
 

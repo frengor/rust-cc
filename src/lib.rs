@@ -150,12 +150,14 @@ fn collect() {
             // create memory leaks accidentally using finalizers than in the previous implementation.
             POSSIBLE_CYCLES.with(|pc| {
                 let mut pc = pc.borrow_mut();
-                non_root_list.into_iter().for_each(|ptr| {
-                    unsafe {
-                        ptr.as_ref().counter_marker().mark(Mark::PossibleCycles);
-                    }
-                    pc.add(ptr);
-                });
+
+                // pc is already marked PossibleCycles, while non_root_list is not.
+                // non_root_list have to be added to pc after having been marked.
+                // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
+                // append the other to it in O(1), since we already know the last element of pc from the marking.
+                // This avoids iterating unnecessarily both lists and the need to update many pointers.
+                mem::swap(&mut *pc, &mut non_root_list);
+                pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
             });
         }
     }

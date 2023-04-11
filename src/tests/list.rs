@@ -47,6 +47,21 @@ fn deallocate(elements: Vec<NonNull<CcOnHeap<i32>>>) {
     });
 }
 
+fn check_list(list: &List) {
+    let mut iter = list.iter();
+    let Some(first) = iter.next() else {
+        return;
+    };
+    unsafe {
+        assert_eq!(*first.as_ref().get_prev(), None);
+        let mut prev = first;
+        for elem in iter {
+            assert_eq!(*elem.as_ref().get_prev(), Some(prev));
+            prev = elem;
+        }
+    }
+}
+
 #[test]
 fn test_new() {
     let list = List::new();
@@ -63,6 +78,7 @@ fn test_add() {
     let elements = new_list(&vec, &mut list);
     assert!(list.first().is_some());
 
+    check_list(&list);
     assert_contains(&list, vec);
 
     drop(list);
@@ -96,6 +112,7 @@ fn test_remove() {
             );
         }
 
+        check_list(&list);
         assert_contains(&list, elements);
         drop(list);
         deallocate(vec);
@@ -157,4 +174,93 @@ fn test_list_moving() {
     unsafe {
         dealloc(cc.cast().as_ptr(), Layout::new::<CcOnHeap<i32>>());
     }
+}
+
+#[test]
+fn test_mark_self_and_append() {
+    let mut list = List::new();
+    let mut to_append = List::new();
+    let elements: Vec<i32> = vec![0, 1, 2];
+    let elements_to_append: Vec<i32> = vec![3, 4, 5];
+    let elements_final: Vec<i32> = vec![0, 1, 2, 3, 4, 5];
+
+    let vec = new_list(&elements, &mut list);
+    let vec_to_append = new_list(&elements_to_append, &mut to_append);
+
+    list.iter().for_each(|elem| unsafe {
+        elem.as_ref().counter_marker().mark(Mark::TraceRoots);
+    });
+    to_append.iter().for_each(|elem| unsafe {
+        elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
+    });
+
+    list.mark_self_and_append(Mark::PossibleCycles, to_append);
+
+    check_list(&list);
+    assert_contains(&list, elements_final);
+    list.iter().for_each(|elem| unsafe {
+        assert!(elem.as_ref().counter_marker().is_in_possible_cycles());
+    });
+
+    drop(list);
+    deallocate(vec);
+    deallocate(vec_to_append);
+}
+
+#[test]
+fn test_mark_self_and_append_empty_list() {
+    let mut list = List::new();
+    let to_append = List::new();
+    let elements: Vec<i32> = vec![0, 1, 2];
+
+    let vec = new_list(&elements, &mut list);
+
+    list.iter().for_each(|elem| unsafe {
+        elem.as_ref().counter_marker().mark(Mark::TraceRoots);
+    });
+
+    list.mark_self_and_append(Mark::PossibleCycles, to_append);
+
+    check_list(&list);
+    assert_contains(&list, elements);
+    list.iter().for_each(|elem| unsafe {
+        assert!(elem.as_ref().counter_marker().is_in_possible_cycles());
+    });
+
+    drop(list);
+    deallocate(vec);
+}
+
+#[test]
+fn test_mark_empty_self_and_append() {
+    let mut list = List::new();
+    let mut to_append = List::new();
+    let elements: Vec<i32> = vec![0, 1, 2];
+
+    let vec = new_list(&elements, &mut to_append);
+
+    to_append.iter().for_each(|elem| unsafe {
+        elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
+    });
+
+    list.mark_self_and_append(Mark::PossibleCycles, to_append);
+
+    check_list(&list);
+    assert_contains(&list, elements);
+    list.iter().for_each(|elem| unsafe {
+        assert!(elem.as_ref().counter_marker().is_in_possible_cycles());
+    });
+
+    drop(list);
+    deallocate(vec);
+}
+
+#[test]
+fn test_mark_empty_self_and_append_empty_list() {
+    let mut list = List::new();
+    let to_append = List::new();
+
+    list.mark_self_and_append(Mark::PossibleCycles, to_append);
+
+    assert!(list.is_empty());
 }
