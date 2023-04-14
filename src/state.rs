@@ -11,7 +11,8 @@ thread_local! {
 #[track_caller]
 #[inline]
 pub(crate) fn state<R>(f: impl FnOnce(&mut State) -> R) -> R {
-    STATE.with(|state| f(&mut state.borrow_mut()))
+    // Use try_state instead of state.with(...) since with is not marked as inline
+    try_state(f).unwrap_or_else(|err| panic!("Couldn't access state: {}", err))
 }
 
 #[track_caller]

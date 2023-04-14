@@ -148,7 +148,7 @@ fn collect() {
             // next iteration of the loop, which will automatically check for resurrected objects
             // using the same algorithm of the initial tracing. This makes it more difficult to
             // create memory leaks accidentally using finalizers than in the previous implementation.
-            POSSIBLE_CYCLES.with(|pc| {
+            let _ = POSSIBLE_CYCLES.try_with(|pc| {
                 let mut pc = pc.borrow_mut();
 
                 // pc is already marked PossibleCycles, while non_root_list is not.
