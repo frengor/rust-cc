@@ -82,12 +82,12 @@ impl Config {
         // First case: the threshold might have to be increased
         if state.allocated_bytes() >= self.bytes_threshold {
 
-            // Feeling the absence of do-while here ='(
-            let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { return; };
-            self.bytes_threshold = new_threshold;
-            while state.allocated_bytes() >= self.bytes_threshold {
+            loop {
                 let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { return; };
                 self.bytes_threshold = new_threshold;
+                if !state.allocated_bytes() >= self.bytes_threshold {
+                    break;
+                }
             }
 
             return; // Skip the other case
