@@ -9,11 +9,13 @@ thread_local! {
 }
 
 #[track_caller]
+#[inline]
 pub(crate) fn state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|state| f(&mut state.borrow_mut()))
 }
 
 #[track_caller]
+#[inline]
 pub(crate) fn try_state<R>(f: impl FnOnce(&mut State) -> R) -> Result<R, StateAccessError> {
     STATE.try_with(|state| Ok(f(state.try_borrow_mut()?.deref_mut())))?
 }
