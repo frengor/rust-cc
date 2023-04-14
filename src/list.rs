@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::mem;
 use std::ptr::NonNull;
 
@@ -14,6 +15,7 @@ impl List {
     }
 
     #[inline]
+    #[cfg(test)] // Only used in tests
     pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
         self.first
     }
@@ -74,76 +76,141 @@ impl List {
     }
 
     #[inline]
+    pub(crate) fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+        match self.first {
+            Some(first) => unsafe {
+                self.first = *first.as_ref().get_next();
+                if let Some(next) = self.first {
+                    *next.as_ref().get_prev() = None;
+                }
+                *first.as_ref().get_next() = None;
+                // prev is already None since it's the first element
+
+                // Make sure the mark is correct
+                first.as_ref().counter_marker().mark(Mark::NonMarked);
+
+                Some(first)
+            },
+            None => {
+                None
+            },
+        }
+    }
+
+    #[inline]
     pub(crate) fn is_empty(&self) -> bool {
         self.first.is_none()
     }
 
     #[inline]
-    pub(crate) fn for_each(&self, mut f: impl FnMut(NonNull<CcOnHeap<()>>)) {
-        let mut current = self.first;
-        while let Some(ptr) = current {
-            unsafe {
-                current = *ptr.as_ref().get_next();
-            }
-            f(ptr);
-        }
-    }
-
-    #[inline]
-    pub(crate) fn for_each_clearing(mut self, mut f: impl FnMut(NonNull<CcOnHeap<()>>)) {
-        // Using self.first as tmp variable since if a call to f panics,
-        // then the List's Drop implementation will take care of it
-        while let Some(ptr) = self.first {
-            unsafe {
-                // Adjust next/prev pointers before running f in order to avoid accessing ptr
-                // after calling f, which may have deallocated the CcOnHeap pointed by ptr.
-                // Calling f as the last operation also avoids corner-cases when f panics
-                self.first = *ptr.as_ref().get_next();
-                *ptr.as_ref().get_next() = None;
-                *ptr.as_ref().get_prev() = None;
-            }
-            f(ptr);
-        }
-        mem::forget(self); // The list is already empty, there's no need to run List's destructor
-    }
-
-    #[inline]
+    #[allow(unused)]
     pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
-        let mut current = self.first;
-        while let Some(current_ptr) = current {
-            if ptr == current_ptr {
-                return true;
+        self.iter().any(|elem| elem == ptr)
+    }
+
+    #[inline]
+    pub(crate) fn iter(&self) -> Iter {
+        self.into_iter()
+    }
+
+    #[inline]
+    #[cfg(test)] // Only used in tests
+    pub(crate) fn into_iter(self) -> ListIter {
+        <Self as IntoIterator>::into_iter(self)
+    }
+
+    /// The elements in `to_append` are assumed to be already marked with `mark` mark.
+    #[inline]
+    pub(crate) fn mark_self_and_append(&mut self, mark: Mark, to_append: List) {
+        if let Some(mut prev) = self.first {
+            for elem in self.iter() {
+                unsafe {
+                    elem.as_ref().counter_marker().mark(mark);
+                }
+                prev = elem;
             }
             unsafe {
-                current = *current_ptr.as_ref().get_next();
+                *prev.as_ref().get_next() = to_append.first;
+                if let Some(ptr) = to_append.first {
+                    *ptr.as_ref().get_prev() = Some(prev);
+                }
             }
+        } else {
+            self.first = to_append.first;
+            // to_append.first.prev is already None
         }
-        false
+        mem::forget(to_append); // Don't run to_append destructor
     }
 }
 
 impl Drop for List {
+    #[inline]
     fn drop(&mut self) {
-        // The if condition should be true only when a panic occurred (or when the thread locals are dropped)
-        if let Some(ptr) = self.first {
-            #[inline(always)]
-            fn remove_elem(ptr: NonNull<CcOnHeap<()>>) -> Option<NonNull<CcOnHeap<()>>> {
-                unsafe {
-                    // Reset the mark to avoid having an inconsistent CcOnHeap
-                    (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
-                    let next = *ptr.as_ref().get_next();
-                    *ptr.as_ref().get_next() = None;
-                    *ptr.as_ref().get_prev() = None;
-                    next
-                }
-            }
-
-            self.first = remove_elem(ptr);
-
-            // Remove the remaining elements from the list
-            while let Some(ptr) = self.first {
-                self.first = remove_elem(ptr);
-            }
+        // Remove the remaining elements from the list
+        while self.remove_first().is_some() {
+            // remove_first already mark every removed element NonMarked
         }
+    }
+}
+
+impl<'a> IntoIterator for &'a List {
+    type Item = NonNull<CcOnHeap<()>>;
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            next: self.first,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl IntoIterator for List {
+    type Item = NonNull<CcOnHeap<()>>;
+    type IntoIter = ListIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        ListIter {
+            list: self,
+        }
+    }
+}
+
+pub(crate) struct Iter<'a> {
+    next: Option<NonNull<CcOnHeap<()>>>,
+    _phantom: PhantomData<&'a CcOnHeap<()>>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = NonNull<CcOnHeap<()>>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next {
+            Some(ptr) => {
+                unsafe {
+                    self.next = *ptr.as_ref().get_next();
+                }
+                Some(ptr)
+            },
+            None => {
+                None
+            },
+        }
+    }
+}
+
+pub(crate) struct ListIter {
+    list: List,
+}
+
+impl Iterator for ListIter {
+    type Item = NonNull<CcOnHeap<()>>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.list.remove_first()
     }
 }

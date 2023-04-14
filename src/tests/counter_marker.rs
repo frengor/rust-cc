@@ -29,19 +29,19 @@ fn test_is_to_finalize() {
     let counter = CounterMarker::new_with_counter_to_one();
     assert!(counter.needs_finalization());
 
-    let mut counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one();
     counter.set_finalized(true);
     assert!(!counter.needs_finalization());
 
-    let mut counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one();
     counter.set_finalized(false);
     assert!(counter.needs_finalization());
 }
 
 #[test]
 fn test_increment_decrement() {
-    fn test(mut counter: CounterMarker) {
-        fn assert_not_marked(counter: &mut CounterMarker) {
+    fn test(counter: CounterMarker) {
+        fn assert_not_marked(counter: &CounterMarker) {
             assert!(counter.is_not_marked());
             assert!(!counter.is_in_possible_cycles());
             assert!(!counter.is_marked_trace_counting());
@@ -49,38 +49,38 @@ fn test_increment_decrement() {
             assert!(counter.is_valid());
         }
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.counter(), 1);
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.tracing_counter(), 1);
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert!(counter.increment_counter().is_ok());
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.counter(), 2);
         assert_eq!(counter.tracing_counter(), 1);
 
         assert!(counter.increment_tracing_counter().is_ok());
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.counter(), 2);
         assert_eq!(counter.tracing_counter(), 2);
 
         assert!(counter.decrement_counter().is_ok());
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.counter(), 1);
         assert!(counter._decrement_tracing_counter().is_ok());
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
 
         assert_eq!(counter.counter(), 1);
         assert_eq!(counter.tracing_counter(), 1);
@@ -110,7 +110,7 @@ fn test_increment_decrement() {
             assert!(counter._decrement_tracing_counter().is_err());
         }
 
-        assert_not_marked(&mut counter);
+        assert_not_marked(&counter);
     }
 
     test(CounterMarker::new_with_counter_to_one());
@@ -119,7 +119,7 @@ fn test_increment_decrement() {
 
 #[test]
 fn test_marks() {
-    fn test(mut counter: CounterMarker) {
+    fn test(counter: CounterMarker) {
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_marked_trace_counting());
@@ -181,7 +181,7 @@ fn test_marks() {
 
 #[test]
 fn test_reset_tracing_counter() {
-    fn test(mut counter: CounterMarker) {
+    fn test(counter: CounterMarker) {
         let _ = counter.increment_tracing_counter();
         let _ = counter.increment_tracing_counter();
         let _ = counter.increment_tracing_counter();

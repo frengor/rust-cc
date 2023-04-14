@@ -16,7 +16,7 @@ mod counter_marker;
 
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
-        pc.replace(List::new()).for_each_clearing(|_| {});
+        pc.replace(List::new());
     });
     state(|state| *state = State::default());
 

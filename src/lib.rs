@@ -2,6 +2,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
+use std::mem;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
@@ -36,7 +37,9 @@ pub fn collect_cycles() {
         return; // We're already collecting
     }
 
-    collect();
+    while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+        collect();
+    }
 
     #[cfg(feature = "auto-collect")]
     adjust_trigger_point();
@@ -50,7 +53,9 @@ pub(crate) fn trigger_collection() {
     });
 
     if should_collect {
-        collect();
+        while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+            collect();
+        }
         adjust_trigger_point();
     }
 }
@@ -83,88 +88,77 @@ fn collect() {
 
     let _drop_guard = DropGuard;
 
-    loop {
-        let ptr = POSSIBLE_CYCLES.try_with(|pc| {
-            let mut pc = pc.borrow_mut();
-            if let Some(first) = pc.first() {
-                pc.remove(first);
+    let mut non_root_list = List::new();
+    {
+        let mut root_list = List::new();
 
-                // SAFETY: it's always safe to access the counter_marker
-                unsafe { (*first.as_ref().counter_marker()).mark(Mark::NonMarked) }; // Keep invariant
-
-                Some(first)
-            } else {
-                None
-            }
-        });
-        if let Ok(Some(ptr)) = ptr {
-            let mut root_list = List::new();
-            let mut non_root_list = List::new();
+        while let Some(ptr) = POSSIBLE_CYCLES.with(|pc| pc.borrow_mut().remove_first()) {
+            // remove_first already marks ptr as NonMarked
 
             // SAFETY: ptr comes from POSSIBLE_CYCLES list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
             unsafe {
                 trace_counting(ptr, &mut root_list, &mut non_root_list);
             }
+        }
 
-            trace_roots(&mut root_list, &mut non_root_list);
+        trace_roots(&mut root_list, &mut non_root_list);
 
-            // SAFETY: it's always safe to access the counter_marker
-            root_list.for_each_clearing(|ptr| unsafe {
-                // Reset mark
-                (*ptr.as_ref().counter_marker()).mark(Mark::NonMarked);
+        #[cfg(feature = "pedantic-debug-assertions")]
+        root_list.iter().for_each(|ptr| unsafe {
+            let counter_marker = ptr.as_ref().counter_marker();
 
-                debug_assert_ne!(
-                    ptr.as_ref().get_tracing_counter(),
-                    ptr.as_ref().get_counter()
-                );
+            debug_assert_ne!(
+                counter_marker.tracing_counter(),
+                counter_marker.counter()
+            );
+            debug_assert!(counter_marker.is_marked_trace_roots());
+        });
+    }
+
+    if !non_root_list.is_empty() {
+        #[cfg(feature = "pedantic-debug-assertions")]
+        non_root_list.iter().for_each(|ptr| unsafe {
+            let counter_marker = ptr.as_ref().counter_marker();
+
+            debug_assert_eq!(
+                counter_marker.tracing_counter(),
+                counter_marker.counter()
+            );
+            debug_assert!(counter_marker.is_marked_trace_counting());
+        });
+
+        let mut has_finalized = false;
+        {
+            let _finalizing_guard = replace_state_field!(finalizing, true);
+
+            non_root_list.iter().for_each(|ptr| {
+                // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
+                if unsafe { CcOnHeap::finalize_inner(ptr.cast()) } {
+                    has_finalized = true;
+                }
             });
 
-            if !non_root_list.is_empty() {
-                // SAFETY: it's always safe to access the counter_marker
-                non_root_list.for_each(|ptr| unsafe {
-                    debug_assert_eq!(
-                        ptr.as_ref().get_tracing_counter(),
-                        ptr.as_ref().get_counter()
-                    );
-                    (*ptr.as_ref().counter_marker()).mark(Mark::TraceRoots);
-                });
+            // _finalizing_guard is dropped here, resetting state.finalizing
+        }
 
-                let mut has_finalized = false;
-                {
-                    let _finalizing_guard = replace_state_field!(finalizing, true);
-
-                    non_root_list.for_each(|ptr| {
-                        // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
-                        if unsafe { CcOnHeap::finalize_inner(ptr.cast()) } {
-                            has_finalized = true;
-                        }
-                    });
-
-                    // _finalizing_guard is dropped here, resetting state.finalizing
-                }
-
-                if !has_finalized {
-                    deallocate_list(non_root_list);
-                } else {
-                    // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
-                    // next iteration of the loop, which will automatically check for resurrected objects
-                    // using the same algorithm of the initial tracing. This makes it more difficult to
-                    // create memory leaks accidentally using finalizers than in the previous implementation.
-                    POSSIBLE_CYCLES.with(|pc| {
-                        let mut pc = pc.borrow_mut();
-                        non_root_list.for_each_clearing(|ptr| {
-                            // SAFETY: it's always safe to access the counter_marker
-                            unsafe {
-                                (*ptr.as_ref().counter_marker()).mark(Mark::PossibleCycles);
-                            }
-                            pc.add(ptr);
-                        });
-                    });
-                }
-            }
+        if !has_finalized {
+            deallocate_list(non_root_list);
         } else {
-            // If POSSIBLE_CYCLES is empty or inaccessible then stop collection
-            break;
+            // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
+            // next iteration of the loop, which will automatically check for resurrected objects
+            // using the same algorithm of the initial tracing. This makes it more difficult to
+            // create memory leaks accidentally using finalizers than in the previous implementation.
+            let _ = POSSIBLE_CYCLES.try_with(|pc| {
+                let mut pc = pc.borrow_mut();
+
+                // pc is already marked PossibleCycles, while non_root_list is not.
+                // non_root_list have to be added to pc after having been marked.
+                // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
+                // append the other to it in O(1), since we already know the last element of pc from the marking.
+                // This avoids iterating unnecessarily both lists and the need to update many pointers.
+                mem::swap(&mut *pc, &mut non_root_list);
+                pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
+            });
         }
     }
 
@@ -176,7 +170,7 @@ fn deallocate_list(to_deallocate_list: List) {
     let _dropping_guard = replace_state_field!(dropping, true);
 
     // Drop every CcOnHeap before deallocating them (see comment below)
-    to_deallocate_list.for_each(|ptr| {
+    to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>.
         //         Also, it's valid to drop in place ptr
         unsafe { CcOnHeap::drop_inner(ptr.cast()) };
@@ -184,7 +178,7 @@ fn deallocate_list(to_deallocate_list: List) {
         // Don't deallocate now since next drop_inner calls will probably access this object while executing drop glues
     });
 
-    to_deallocate_list.for_each_clearing(|ptr| {
+    to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr.as_ref().elem is never read or written (only the layout information is read)
         //         and then the allocation gets deallocated immediately after
         unsafe {
@@ -192,6 +186,9 @@ fn deallocate_list(to_deallocate_list: List) {
             cc_dealloc(ptr, layout);
         }
     });
+
+    // Don't remove the mark from dropped CcOnHeaps
+    mem::forget(to_deallocate_list);
 
     // _dropping_guard is dropped here, resetting state.dropping
 }
@@ -213,7 +210,7 @@ unsafe fn trace_counting(
 
 fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
     let mut ctx = Context::new(ContextInner::RootTracing { non_root_list });
-    root_list.for_each(|ptr| {
+    root_list.iter().for_each(|ptr| {
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
             CcOnHeap::start_tracing(ptr, &mut ctx);

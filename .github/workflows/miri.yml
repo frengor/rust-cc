@@ -1,9 +1,10 @@
-name: Run Miri
+name: Miri
 
 on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   build:
@@ -17,10 +18,8 @@ jobs:
           rustup override set nightly
           cargo miri setup
       - name: Run tests
-        run: cargo miri test --verbose --workspace
-      - name: Run tests with every non-nightly feature
-        run: cargo miri test -F all-non-nightly --verbose --workspace
-      - name: Run tests with nightly feature
-        run: cargo miri test -F nightly --verbose --workspace
+        run: cargo miri test -F pedantic-debug-assertions --verbose --workspace
+      - name: Run full tests
+        run: cargo miri test -F full,pedantic-debug-assertions --verbose --workspace
       - name: Run tests with every feature
         run: cargo miri test --all-features --verbose --workspace

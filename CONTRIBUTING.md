@@ -8,17 +8,12 @@ Also, remember to open the pull requests toward the `dev` branch. The `main` bra
 
 ## The collection algorithm
 
-The core idea behind the algorithm is the same as the one presented by Lins in ["Cyclic Reference Counting With Lazy Mark-Scan"](https://kar.kent.ac.uk/22347/1/CyclicLin.pdf).  
+The core idea behind the algorithm is the same as the one presented by Lins in ["Cyclic Reference Counting With Lazy Mark-Scan"](https://kar.kent.ac.uk/22347/1/CyclicLin.pdf)
+and by Bacon and Rajan in ["Concurrent Cycle Collection in Reference Counted Systems"](https://pages.cs.wisc.edu/~cymen/misc/interests/Bacon01Concurrent.pdf).  
 However, the implementation differs in order to make the collector faster and more resilient to random panics and failures in general.
 
-> **N.B.:** `rust-cc` is *not* strictly an implementation of the algorithm shown in the linked paper and it's never been
+> **N.B.:** `rust-cc` is *not* strictly an implementation of the algorithm shown in the linked papers and it's never been
 > intended as such. Feel free to propose any kind of improvement!
-
-> Also, a future update will provide the fix proposed by Bacon and Rajan in
-> ["Concurrent Cycle Collection in Reference Counted Systems"](https://pages.cs.wisc.edu/~cymen/misc/interests/Bacon01Concurrent.pdf)
-> in order to prevent the pessimistic quadratic behaviour of the Lins algorithm.  
-> There are already some improvements, like it's not possible to have the same object twice into the list of possible
-> roots of cyclic garbage (the `POSSIBLE_CYCLES` list).
 
 The following is a summarized version of the collection algorithm:  
 When a `Cc` smart pointer is dropped, the reference count (RC) is decreased by 1. If it reaches 0, then the allocated
@@ -28,12 +23,12 @@ Sometimes (see [`crate::trigger_collection`](./src/lib.rs)), when creating a new
 the objects inside the `POSSIBLE_CYCLES` list are checked to see if they are part of a garbage cycle.
 
 Therefore, they undergo two tracing passes:
-- **Trace Counting:** during this phase, starting from the elements inside `POSSIBLE_CYCLES` (one at a time for now, see the note above),
+- **Trace Counting:** during this phase, starting from the elements inside `POSSIBLE_CYCLES`,
   objects are traced to count the amount of pointers to each `CcOnHeap` that are reachable from the list's `Cc`s.  
   The `tracing_counter` "field" (see the [`counter_marker` module](./src/counter_marker.rs) for more info) is used to keep track of this number.
   <details>
   <summary>About tracing_counter</summary>
-  <p>In the paper, Lins decrements the RC itself instead of using another counter. However, if during tracing there was a panic,
+  <p>In the papers, Lins, Bacon and Rajan decrement the RC itself instead of using another counter. However, if during tracing there was a panic,
      it would be hard for `rust-cc` to restore the RC correctly. This is the reason for the choice of having another counter.
      The invariant regarding this second counter is that it must always be between 0 and RC inclusively. 
   </p>
