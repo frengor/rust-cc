@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::mem;
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
@@ -101,18 +102,7 @@ fn collect() {
             }
         }
 
-        trace_roots(&mut root_list, &mut non_root_list);
-
-        #[cfg(feature = "pedantic-debug-assertions")]
-        root_list.iter().for_each(|ptr| unsafe {
-            let counter_marker = ptr.as_ref().counter_marker();
-
-            debug_assert_ne!(
-                counter_marker.tracing_counter(),
-                counter_marker.counter()
-            );
-            debug_assert!(counter_marker.is_marked_trace_roots());
-        });
+        trace_roots(root_list, &mut non_root_list);
     }
 
     if !non_root_list.is_empty() {
@@ -124,7 +114,7 @@ fn collect() {
                 counter_marker.tracing_counter(),
                 counter_marker.counter()
             );
-            debug_assert!(counter_marker.is_marked_trace_counting());
+            debug_assert!(counter_marker.is_traced());
         });
 
         let mut has_finalized = false;
@@ -173,22 +163,28 @@ fn deallocate_list(to_deallocate_list: List) {
     to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>.
         //         Also, it's valid to drop in place ptr
-        unsafe { CcOnHeap::drop_inner(ptr.cast()) };
+        unsafe {
+            debug_assert!(ptr.as_ref().counter_marker().is_traced());
+
+            CcOnHeap::drop_inner(ptr.cast());
+        };
 
         // Don't deallocate now since next drop_inner calls will probably access this object while executing drop glues
     });
 
+    // Don't drop the list now if a panic happens
+    // No panic should ever happen, however cc_dealloc could in theory panic if state is not accessible
+    // (which should never happen, but better be sure no UB is possible)
+    let to_deallocate_list = ManuallyDrop::new(to_deallocate_list);
+
     to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr.as_ref().elem is never read or written (only the layout information is read)
-        //         and then the allocation gets deallocated immediately after
+        //         and then the allocation gets deallocated immediately after.
         unsafe {
             let layout = ptr.as_ref().layout();
             cc_dealloc(ptr, layout);
         }
     });
-
-    // Don't remove the mark from dropped CcOnHeaps
-    mem::forget(to_deallocate_list);
 
     // _dropping_guard is dropped here, resetting state.dropping
 }
@@ -208,12 +204,14 @@ unsafe fn trace_counting(
     CcOnHeap::start_tracing(ptr, &mut ctx);
 }
 
-fn trace_roots(root_list: &mut List, non_root_list: &mut List) {
-    let mut ctx = Context::new(ContextInner::RootTracing { non_root_list });
-    root_list.iter().for_each(|ptr| {
+fn trace_roots(mut root_list: List, non_root_list: &mut List) {
+    while let Some(ptr) = root_list.remove_first() {
+        let mut ctx = Context::new(ContextInner::RootTracing { non_root_list, root_list: &mut root_list });
         // SAFETY: ptr comes from a list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
         unsafe {
             CcOnHeap::start_tracing(ptr, &mut ctx);
         }
-    });
+    }
+
+    mem::forget(root_list); // root_list is empty, no need run List::drop
 }

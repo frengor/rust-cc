@@ -131,7 +131,7 @@ fn test_for_each_clearing_panic() {
 
     for it in &mut vec {
         unsafe {
-            it.as_ref().counter_marker().mark(Mark::TraceCounting); // Just a random mark
+            it.as_ref().counter_marker().mark(Mark::PossibleCycles); // Just a random mark
         }
     }
 
@@ -188,7 +188,7 @@ fn test_mark_self_and_append() {
     let vec_to_append = new_list(&elements_to_append, &mut to_append);
 
     list.iter().for_each(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::TraceRoots);
+        elem.as_ref().counter_marker().mark(Mark::Traced);
     });
     to_append.iter().for_each(|elem| unsafe {
         elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
@@ -216,7 +216,7 @@ fn test_mark_self_and_append_empty_list() {
     let vec = new_list(&elements, &mut list);
 
     list.iter().for_each(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::TraceRoots);
+        elem.as_ref().counter_marker().mark(Mark::Traced);
     });
 
     list.mark_self_and_append(Mark::PossibleCycles, to_append);
