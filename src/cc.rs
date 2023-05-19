@@ -493,6 +493,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
     }
 }
 
+#[inline]
 pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
     unsafe {
         // Check if ptr is in possible_cycles list. Note that if ptr points to an invalid CcOnHeap<_>,
@@ -525,6 +526,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 }
 
 /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
+#[inline]
 pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
     // Check if ptr can be added safely
     debug_assert!(ptr.as_ref().is_valid());
