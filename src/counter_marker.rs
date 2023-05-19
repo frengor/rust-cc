@@ -4,8 +4,7 @@ use crate::utils;
 
 const NON_MARKED: u32 = 0u32;
 const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 3);
-const TRACING_COUNTING_MARKED: u32 = 2u32 << (u32::BITS - 3);
-const TRACING_ROOTS_MARKED: u32 = 3u32 << (u32::BITS - 3);
+const TRACED: u32 = 2u32 << (u32::BITS - 3);
 const INVALID: u32 = 0b111u32 << (u32::BITS - 3);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
@@ -25,11 +24,10 @@ const MAX: u32 = COUNTER_MASK;
 /// +-----------+----------+------------+------------+
 /// ```
 ///
-/// * `A` has 6 possible states:
+/// * `A` has 4 possible states:
 ///   * `NON_MARKED`
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
-///   * `TRACING_COUNTING_MARKED`
-///   * `TRACING_ROOT_MARKED`
+///   * `TRACED`
 ///   * `INVALID` (`CcOnHeap` is invalid)
 /// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
@@ -147,13 +145,8 @@ impl CounterMarker {
     }
 
     #[inline]
-    pub(crate) fn is_marked_trace_counting(&self) -> bool {
-        (self.counter.get() & BITS_MASK) == TRACING_COUNTING_MARKED
-    }
-
-    #[inline]
-    pub(crate) fn is_marked_trace_roots(&self) -> bool {
-        (self.counter.get() & BITS_MASK) == TRACING_ROOTS_MARKED
+    pub(crate) fn is_traced(&self) -> bool {
+        (self.counter.get() & BITS_MASK) == TRACED
     }
 
     #[inline]
@@ -172,7 +165,6 @@ impl CounterMarker {
 pub(crate) enum Mark {
     NonMarked = NON_MARKED,
     PossibleCycles = IN_POSSIBLE_CYCLES,
-    TraceCounting = TRACING_COUNTING_MARKED,
-    TraceRoots = TRACING_ROOTS_MARKED,
+    Traced = TRACED,
     Invalid = INVALID,
 }

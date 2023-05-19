@@ -182,6 +182,7 @@ pub(crate) enum ContextInner<'a> {
         non_root_list: &'a mut List,
     },
     RootTracing {
+        root_list: &'a mut List,
         non_root_list: &'a mut List,
     },
 }

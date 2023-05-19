@@ -16,7 +16,7 @@ use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
-use crate::{try_state, POSSIBLE_CYCLES};
+use crate::POSSIBLE_CYCLES;
 
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
@@ -250,12 +250,6 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
             panic!("Too many references has been created to a single Cc");
         }
 
-        // Incrementing the tracing counter is necessary during finalization, always doing it
-        // avoids the need to check whether state(|state| state.is_finalizing()) is true.
-        // The result is discarded since the tracing counter may be greater than the counter,
-        // however it is correct (i.e. equals to the counter) during finalization
-        let _ = self.inner().counter_marker().increment_tracing_counter();
-
         remove_from_list(self.inner.cast());
 
         // It's always safe to clone a Cc, even if the underlying CcOnHeap is invalid
@@ -293,20 +287,9 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
         let res = counter_marker.decrement_counter();
         debug_assert!(res.is_ok());
 
-        // If invalid no further actions are required
-        if !counter_marker.is_valid() {
-            return;
-        }
-
-        // If we're collecting and we're traced then we're part of a list different than POSSIBLE_CYCLES.
-        // Almost no further action has to be taken, since the counter has been already decremented.
-        let Ok(collecting) = try_state(|state| (state.is_collecting())) else {
-            // If state is not accessible then don't proceed further
-            return;
-        };
-
-        // We know that inner is valid, so this is true only when collecting is true and counter_marker is traced
-        if collecting && counter_marker.is_traced_or_invalid() {
+        // A CcOnHeap can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
+        // In this case, or when invalid, no further action has to be taken, since the counter has been already decremented.
+        if counter_marker.is_traced_or_invalid() {
             return;
         }
 
@@ -635,13 +618,13 @@ impl CcOnHeap<()> {
                 counter_marker.reset_tracing_counter();
 
                 // Element is surely not already marked, marking
-                counter_marker.mark(Mark::TraceCounting);
+                counter_marker.mark(Mark::Traced);
             },
             ContextInner::RootTracing { .. } => {
-                // ptr is into root_list
+                // ptr is a root
 
-                // Element is not already marked, marking
-                counter_marker.mark(Mark::TraceRoots);
+                // Nothing to do here, ptr is already unmarked
+                debug_assert!(counter_marker.is_not_marked());
             },
         }
 
@@ -666,18 +649,18 @@ impl CcOnHeap<()> {
     unsafe fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         debug_assert!(ptr.as_ref().is_valid());
 
+        #[inline(always)]
+        fn non_root(counter_marker: &CounterMarker) -> bool {
+            counter_marker.tracing_counter() == counter_marker.counter()
+        }
+
         let counter_marker = ptr.as_ref().counter_marker();
         match ctx.inner() {
             ContextInner::Counting {
                 root_list,
                 non_root_list,
             } => {
-                #[inline(always)]
-                fn non_root(counter_marker: &CounterMarker) -> bool {
-                    counter_marker.tracing_counter() == counter_marker.counter()
-                }
-
-                if !counter_marker.is_marked_trace_counting() {
+                if !counter_marker.is_traced() {
                     // Not already marked
 
                     // Make sure ptr is not in POSSIBLE_CYCLES list
@@ -698,7 +681,7 @@ impl CcOnHeap<()> {
 
                     // Marking here since the previous debug_asserts might panic
                     // before ptr is actually added to root_list or non_root_list
-                    counter_marker.mark(Mark::TraceCounting);
+                    counter_marker.mark(Mark::Traced);
 
                     // Continue tracing
                     true
@@ -720,36 +703,24 @@ impl CcOnHeap<()> {
                     false
                 }
             },
-            ContextInner::RootTracing { non_root_list } => {
-                if !counter_marker.is_marked_trace_roots() {
-                    if !counter_marker.is_marked_trace_counting() {
-                        // This CcOnHeap hasn't been traced during trace counting, so
-                        // don't trace it now since it will surely not be deallocated
-                        return false;
-                    }
-
-                    if counter_marker.tracing_counter() < counter_marker.counter() {
-                        // If ptr is a root then stop tracing, since it will be handled
-                        // at the next iteration of start_tracing
-
-                        // Avoids tracing this CcOnHeap again
-                        counter_marker.mark(Mark::TraceRoots);
-                        return false;
-                    }
-
-                    // Else remove the element from non_root_list.
-                    // Marking NonMarked since ptr will be removed from the list. Also, marking NonMarked
-                    // will avoid tracing this CcOnHeap again, thanks to the 2 nested ifs above: at the
-                    // next iteration this CcOnHeap won't be marked neither TraceRoots nor TraceCounting,
-                    // so this function will return false and no tracing will happen
+            ContextInner::RootTracing { non_root_list, root_list } => {
+                if counter_marker.is_traced() {
+                    // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
+                    // NonMarked will avoid tracing this CcOnHeap again (thanks to the if condition)
                     counter_marker.mark(Mark::NonMarked);
-                    non_root_list.remove(ptr);
+
+                    if non_root(counter_marker) {
+                        non_root_list.remove(ptr);
+                    } else {
+                        root_list.remove(ptr);
+                    }
 
                     // Continue root tracing
-                    return true;
+                    true
+                } else {
+                    // Don't continue tracing
+                    false
                 }
-                // Don't continue trace in any other case
-                false
             },
         }
     }
