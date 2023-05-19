@@ -496,10 +496,12 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
 #[inline]
 pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
     unsafe {
+        let counter_marker = ptr.as_ref().counter_marker();
+
         // Check if ptr is in possible_cycles list. Note that if ptr points to an invalid CcOnHeap<_>,
         // then the if guard should never be true, since it is always marked as Mark::Invalid.
         // This is also the reason why this function is not marked as unsafe.
-        if ptr.as_ref().counter_marker().is_in_possible_cycles() {
+        if counter_marker.is_in_possible_cycles() {
             // ptr is in the list, remove it
             let _ = POSSIBLE_CYCLES.try_with(|pc| {
                 let mut list = pc.borrow_mut();
@@ -507,8 +509,8 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
                 #[cfg(feature = "pedantic-debug-assertions")]
                 debug_assert!(list.contains(ptr));
 
+                counter_marker.mark(Mark::NonMarked);
                 list.remove(ptr);
-                ptr.as_ref().counter_marker().mark(Mark::NonMarked);
             });
         } else {
             // ptr is not in the list
@@ -528,13 +530,16 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
 #[inline]
 pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
+    let counter_marker = ptr.as_ref().counter_marker();
+
     // Check if ptr can be added safely
-    debug_assert!(ptr.as_ref().is_valid());
+    debug_assert!(counter_marker.is_valid());
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
         let mut list = pc.borrow_mut();
+
         // Check if ptr is in possible_cycles list since we have to move it at its start
-        if ptr.as_ref().counter_marker().is_in_possible_cycles() {
+        if counter_marker.is_in_possible_cycles() {
             // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(list.contains(ptr));
@@ -545,10 +550,10 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
             // Confirm !is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(!list.contains(ptr));
-            debug_assert!(ptr.as_ref().counter_marker().is_not_marked());
+            debug_assert!(counter_marker.is_not_marked());
 
             // Mark it
-            ptr.as_ref().counter_marker().mark(Mark::PossibleCycles);
+            counter_marker.mark(Mark::PossibleCycles);
         }
         // Add to the list
         //
