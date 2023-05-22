@@ -29,6 +29,7 @@ pub(crate) fn reset_state() {
 
 pub(crate) struct Droppable<T: Trace> {
     inner: T,
+    #[allow(unused)]
     finalize: Arc<Cell<bool>>,
     drop: Arc<Cell<bool>>,
 }
@@ -72,8 +73,14 @@ unsafe impl<T: Trace> Trace for Droppable<T> {
 
 impl<T: Trace> Finalize for Droppable<T> {
     fn finalize(&self) {
-        assert_finalizing();
-        self.finalize.set(true);
+        #[cfg(not(feature = "finalization"))]
+        panic!("Finalized called with finalization feature disabled!");
+
+        #[cfg(feature = "finalization")]
+        {
+            assert_finalizing();
+            self.finalize.set(true);
+        }
     }
 }
 
@@ -86,16 +93,19 @@ impl<T: Trace> Drop for Droppable<T> {
 }
 
 pub(crate) struct DropChecker {
+    #[allow(unused)]
     finalize: Arc<Cell<bool>>,
     drop: Arc<Cell<bool>>,
 }
 
 impl DropChecker {
     pub(crate) fn assert_finalized(&self) {
+        #[cfg(feature = "finalization")]
         assert!(self.finalize.get(), "Expected finalized!");
     }
 
     pub(crate) fn assert_not_finalized(&self) {
+        #[cfg(feature = "finalization")]
         assert!(!self.finalize.get(), "Expected not finalized!");
     }
 
@@ -122,11 +132,15 @@ pub(crate) fn assert_collecting() {
 pub(crate) fn assert_tracing() {
     state(|state| {
         assert!(state.is_tracing());
+
+        #[cfg(feature = "finalization")]
         assert!(!state.is_finalizing());
+
         assert!(!state.is_dropping());
     });
 }
 
+#[cfg(feature = "finalization")]
 pub(crate) fn assert_finalizing() {
     state(|state| {
         assert!(!state.is_tracing());
@@ -138,7 +152,10 @@ pub(crate) fn assert_finalizing() {
 pub(crate) fn assert_dropping() {
     state(|state| {
         assert!(!state.is_tracing());
+
+        #[cfg(feature = "finalization")]
         assert!(!state.is_finalizing());
+
         assert!(state.is_dropping());
     });
 }
@@ -147,7 +164,10 @@ pub(crate) fn assert_state_not_collecting() {
     state(|state| {
         assert!(!state.is_collecting());
         assert!(!state.is_tracing());
+
+        #[cfg(feature = "finalization")]
         assert!(!state.is_finalizing());
+
         assert!(!state.is_dropping());
     });
 }
@@ -162,6 +182,8 @@ fn make_sure_droppable_is_finalizable() {
         let _ = Cc::new(droppable);
     }
 
+    #[cfg(feature = "finalization")]
     checker.assert_finalized();
+
     checker.assert_dropped();
 }
