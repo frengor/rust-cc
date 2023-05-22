@@ -209,6 +209,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.inner().is_valid()
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     #[track_caller]
     pub fn finalize_again(&mut self) {
@@ -217,6 +218,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.inner().counter_marker().set_finalized(false);
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub fn already_finalized(&self) -> bool {
         !self.inner().counter_marker().needs_finalization()
@@ -298,7 +300,11 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             remove_from_list(self.inner.cast());
 
-            let to_drop = if counter_marker.needs_finalization() {
+            let to_drop = if cfg!(feature = "finalization") && counter_marker.needs_finalization() {
+                // This cfg is necessary since the cfg! above still compiles the line below,
+                // however state doesn't contain the finalizing field when the finalization feature is off,
+                // so removing this cfg makes the crate to fail compilation
+                #[cfg(feature = "finalization")]
                 let _finalizing_guard = replace_state_field!(finalizing, true);
 
                 // Set finalized
@@ -572,6 +578,7 @@ impl CcOnHeap<()> {
     }
 
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
         if ptr.as_ref().counter_marker().needs_finalization() {
