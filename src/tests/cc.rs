@@ -215,6 +215,8 @@ fn test_trait_object() {
         TRACED.with(|dropped| dropped.get()),
         "MyTraitObject hasn't been traced"
     );
+
+    #[cfg(feature = "finalization")]
     assert!(
         FINALIZED.with(|dropped| dropped.get()),
         "MyTraitObject hasn't been traced"

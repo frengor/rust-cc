@@ -32,7 +32,10 @@ pub(crate) enum StateAccessError {
 #[derive(Default)]
 pub(crate) struct State {
     collecting: bool,
+
+    #[cfg(feature = "finalization")]
     finalizing: bool,
+
     dropping: bool,
     allocated_bytes: usize,
     execution_counter: usize,
@@ -69,11 +72,13 @@ impl State {
         self.collecting = value;
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn is_finalizing(&self) -> bool {
         self.finalizing
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn set_finalizing(&mut self, value: bool) {
         self.finalizing = value;
@@ -91,7 +96,15 @@ impl State {
 
     #[inline]
     pub(crate) fn is_tracing(&self) -> bool {
-        self.collecting && !self.finalizing && !self.dropping
+        #[cfg(feature = "finalization")]
+        {
+            self.collecting && !self.finalizing && !self.dropping
+        }
+
+        #[cfg(not(feature = "finalization"))]
+        {
+            self.collecting && !self.dropping
+        }
     }
 }
 
@@ -191,21 +204,24 @@ mod tests {
         }
         state(|state| assert!(!state.dropping));
 
-        // Test state.finalizing = true
-        state(|state| state.finalizing = true);
+        #[cfg(feature = "finalization")]
         {
-            let _finalizing_guard = replace_state_field!(finalizing, false);
+            // Test state.finalizing = true
+            state(|state| state.finalizing = true);
+            {
+                let _finalizing_guard = replace_state_field!(finalizing, false);
+                state(|state| assert!(!state.finalizing));
+            }
+            state(|state| assert!(state.finalizing));
+
+            // Test state.finalizing = false
+            state(|state| state.finalizing = false);
+            {
+                let _finalizing_guard = replace_state_field!(finalizing, true);
+                state(|state| assert!(state.finalizing));
+            }
             state(|state| assert!(!state.finalizing));
         }
-        state(|state| assert!(state.finalizing));
-
-        // Test state.finalizing = false
-        state(|state| state.finalizing = false);
-        {
-            let _finalizing_guard = replace_state_field!(finalizing, true);
-            state(|state| assert!(state.finalizing));
-        }
-        state(|state| assert!(!state.finalizing));
     }
 
     #[test]

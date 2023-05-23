@@ -136,7 +136,7 @@ fn test_panicking_tracing_root() {
 }
 
 #[test]
-#[should_panic = "Test panic on Finalize"]
+#[cfg_attr(feature = "finalization", should_panic = "Test panic on Finalize")]
 fn test_panicking_finalize() {
     reset_state();
 
@@ -201,7 +201,7 @@ fn test_panicking_drop_and_finalize() {
 }
 
 #[test]
-#[should_panic = "Test panic on Trace"]
+#[cfg_attr(feature = "finalization", should_panic = "Test panic on Trace")]
 fn test_panicking_tracing_drop() {
     reset_state();
 
@@ -234,7 +234,7 @@ fn test_panicking_tracing_drop() {
 }
 
 #[test]
-#[should_panic = "Test panic on Trace"]
+#[cfg_attr(feature = "finalization", should_panic = "Test panic on Trace")]
 fn test_panicking_tracing_resurrecting() {
     reset_state();
 

@@ -1,7 +1,9 @@
+//! Code of an old benchmark, modified and kept for testing
+
 use std::cell::RefCell;
 
 use crate::tests::reset_state;
-use crate::{collect_cycles, Cc, Context, Finalize, Trace};
+use crate::{collect_cycles, Cc, Context, Trace};
 
 thread_local! {
    static FREED_LIST: RefCell<String> = RefCell::new(String::with_capacity(10));
@@ -15,46 +17,50 @@ fn test() {
     one();
     FREED_LIST.with(|str| {
         let mut str = str.borrow_mut();
-        if let Some((first, second)) = str.split_once('-') {
-            assert_eq!(first.len(), 2);
-            assert_eq!(second.len(), 3);
-            assert!(first.contains('C'));
-            assert!(first.contains('D'));
+        let Some((first, second)) = str.split_once('-') else {
+            panic!("String doesn't contains a -.");
+        };
+        assert_eq!(first.len(), 2);
+        assert_eq!(second.len(), 3);
+        assert!(first.contains('C'));
+        assert!(first.contains('D'));
+        assert!(second.contains('A'));
+        assert!(second.contains('B'));
+        assert!(second.contains('E'));
+
+        str.clear();
+    });
+
+    reset_state();
+
+    #[cfg(feature = "finalization")]
+    {
+        two();
+        FREED_LIST.with(|str| {
+            let mut str = str.borrow_mut();
+            let Some((first, second)) = str.split_once('-') else {
+                panic!("String doesn't contains a -.");
+            };
+            assert_eq!(first.len(), 0);
+            let Some((second, third)) = second.split_once('-') else {
+                panic!("String doesn't contains a second -.");
+            };
+            assert_eq!(second.len(), 5);
+            assert_eq!(third.len(), 1);
             assert!(second.contains('A'));
             assert!(second.contains('B'));
+            assert!(second.contains('C'));
+            assert!(second.contains('D'));
             assert!(second.contains('E'));
-        } else {
-            panic!("String doesn't contains a -.");
-        }
-        str.clear();
-    });
-    two();
-    FREED_LIST.with(|str| {
-        let mut str = str.borrow_mut();
-        if let Some((first, second)) = str.split_once('-') {
-            assert_eq!(first.len(), 0);
-            if let Some((second, third)) = second.split_once('-') {
-                assert_eq!(second.len(), 5);
-                assert_eq!(third.len(), 1);
-                assert!(second.contains('A'));
-                assert!(second.contains('B'));
-                assert!(second.contains('C'));
-                assert!(second.contains('D'));
-                assert!(second.contains('E'));
-                assert!(third.contains('D'));
-            } else {
-                panic!("String doesn't contains a second -.");
-            }
-        } else {
-            panic!("String doesn't contains a -.");
-        }
-        str.clear();
-    });
+            assert!(third.contains('D'));
+            str.clear();
+        });
+    }
 }
 
 fn one() {
     GLOBAL_CC.with(|global| {
-        // Don't make <C as Drop>::drop move D into GLOBAL_CC!
+        // Don't make <C as Finalize>::finalize move D into GLOBAL_CC!
         // That is tested in function two()
         let _unused = global.borrow_mut();
 
@@ -77,6 +83,7 @@ thread_local! {
     static GLOBAL_CC: RefCell<Option<Cc<D>>> = RefCell::new(None);
 }
 
+#[cfg(feature = "finalization")]
 fn two() {
     {
         let root1 = build();
@@ -183,47 +190,82 @@ unsafe impl Trace for E {
     fn trace(&self, _: &mut Context<'_>) {}
 }
 
-impl Finalize for A {
-    fn finalize(&self) {
-        FREED_LIST.with(|str| {
-            str.borrow_mut().push('A');
-        });
-    }
-}
-
-impl Finalize for B {
-    fn finalize(&self) {
-        FREED_LIST.with(|str| {
-            str.borrow_mut().push('B');
-        });
-    }
-}
-
-impl Finalize for C {
-    fn finalize(&self) {
-        FREED_LIST.with(|str| {
-            str.borrow_mut().push('C');
-        });
-        GLOBAL_CC.with(|global| {
-            if let Ok(mut global) = global.try_borrow_mut() {
-                *global = self.d.take();
+macro_rules! finalize_or_drop {
+    (impl Finalize/Drop for $id:ident { fn finalize/drop(&$selfId:ident) $body:block }) => {
+        #[cfg(feature = "finalization")]
+        impl $crate::Finalize for $id {
+            fn finalize(&$selfId) {
+                $body
             }
-        });
+        }
+
+        #[cfg(not(feature = "finalization"))]
+        impl $crate::Finalize for $id {
+            fn finalize(&$selfId) {}
+        }
+
+        #[cfg(not(feature = "finalization"))]
+        impl ::std::ops::Drop for $id {
+            fn drop(&mut $selfId) {
+                $body
+            }
+        }
+    };
+}
+
+finalize_or_drop! {
+    impl Finalize/Drop for A {
+        fn finalize/drop(&self) {
+            FREED_LIST.with(|str| {
+                str.borrow_mut().push('A');
+            });
+        }
     }
 }
 
-impl Finalize for D {
-    fn finalize(&self) {
-        FREED_LIST.with(|str| {
-            str.borrow_mut().push('D');
-        });
+finalize_or_drop! {
+    impl Finalize/Drop for B {
+        fn finalize/drop(&self) {
+            FREED_LIST.with(|str| {
+                str.borrow_mut().push('B');
+            });
+        }
     }
 }
 
-impl Finalize for E {
-    fn finalize(&self) {
-        FREED_LIST.with(|str| {
-            str.borrow_mut().push('E');
-        });
+finalize_or_drop! {
+    impl Finalize/Drop for C {
+        fn finalize/drop(&self) {
+            FREED_LIST.with(|str| {
+                str.borrow_mut().push('C');
+            });
+
+            #[cfg(feature = "finalization")]
+            GLOBAL_CC.with(|global| {
+                if let Ok(mut global) = global.try_borrow_mut() {
+                    *global = self.d.take();
+                }
+            });
+        }
+    }
+}
+
+finalize_or_drop! {
+    impl Finalize/Drop for D {
+       fn finalize/drop(&self) {
+            FREED_LIST.with(|str| {
+                str.borrow_mut().push('D');
+            });
+        }
+    }
+}
+
+finalize_or_drop! {
+    impl Finalize/Drop for E {
+        fn finalize/drop(&self) {
+            FREED_LIST.with(|str| {
+                str.borrow_mut().push('E');
+            });
+        }
     }
 }

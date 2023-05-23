@@ -24,10 +24,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["auto-collect"]
-full = ["auto-collect"]
+default = ["auto-collect", "finalization"]
+full = ["auto-collect", "finalization"] # Every feature except for "nightly" and "pedantic-debug-assertions"
 nightly = []
 auto-collect = []
+finalization = []
 pedantic-debug-assertions = []
 
 [dependencies]

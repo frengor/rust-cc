@@ -176,6 +176,7 @@ fn test_list_moving() {
     }
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_mark_self_and_append() {
     let mut list = List::new();
@@ -207,6 +208,7 @@ fn test_mark_self_and_append() {
     deallocate(vec_to_append);
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_mark_self_and_append_empty_list() {
     let mut list = List::new();
@@ -231,6 +233,7 @@ fn test_mark_self_and_append_empty_list() {
     deallocate(vec);
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_mark_empty_self_and_append() {
     let mut list = List::new();
@@ -255,6 +258,7 @@ fn test_mark_empty_self_and_append() {
     deallocate(vec);
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_mark_empty_self_and_append_empty_list() {
     let mut list = List::new();

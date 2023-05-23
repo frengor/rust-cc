@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata))]
+#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata, doc_auto_cfg))]
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use std::cell::RefCell;
@@ -38,9 +38,7 @@ pub fn collect_cycles() {
         return; // We're already collecting
     }
 
-    while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
-        collect();
-    }
+    collect();
 
     #[cfg(feature = "auto-collect")]
     adjust_trigger_point();
@@ -54,9 +52,7 @@ pub(crate) fn trigger_collection() {
     });
 
     if should_collect {
-        while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
-            collect();
-        }
+        collect();
         adjust_trigger_point();
     }
 }
@@ -89,6 +85,19 @@ fn collect() {
 
     let _drop_guard = DropGuard;
 
+    #[cfg(feature = "finalization")]
+    while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+        __collect();
+    }
+    #[cfg(not(feature = "finalization"))]
+    if let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+        __collect();
+    }
+
+    // _drop_guard is dropped here, setting state.collecting to false
+}
+
+fn __collect() {
     let mut non_root_list = List::new();
     {
         let mut root_list = List::new();
@@ -117,42 +126,48 @@ fn collect() {
             debug_assert!(counter_marker.is_traced());
         });
 
-        let mut has_finalized = false;
+        #[cfg(feature = "finalization")]
         {
-            let _finalizing_guard = replace_state_field!(finalizing, true);
+            let mut has_finalized = false;
+            {
+                let _finalizing_guard = replace_state_field!(finalizing, true);
 
-            non_root_list.iter().for_each(|ptr| {
-                // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
-                if unsafe { CcOnHeap::finalize_inner(ptr.cast()) } {
-                    has_finalized = true;
-                }
-            });
+                non_root_list.iter().for_each(|ptr| {
+                    // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
+                    if unsafe { CcOnHeap::finalize_inner(ptr.cast()) } {
+                        has_finalized = true;
+                    }
+                });
 
-            // _finalizing_guard is dropped here, resetting state.finalizing
+                // _finalizing_guard is dropped here, resetting state.finalizing
+            }
+
+            if !has_finalized {
+                deallocate_list(non_root_list);
+            } else {
+                // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
+                // next iteration of the loop, which will automatically check for resurrected objects
+                // using the same algorithm of the initial tracing. This makes it more difficult to
+                // create memory leaks accidentally using finalizers than in the previous implementation.
+                let _ = POSSIBLE_CYCLES.try_with(|pc| {
+                    let mut pc = pc.borrow_mut();
+
+                    // pc is already marked PossibleCycles, while non_root_list is not.
+                    // non_root_list have to be added to pc after having been marked.
+                    // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
+                    // append the other to it in O(1), since we already know the last element of pc from the marking.
+                    // This avoids iterating unnecessarily both lists and the need to update many pointers.
+                    mem::swap(&mut *pc, &mut non_root_list);
+                    pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
+                });
+            }
         }
 
-        if !has_finalized {
+        #[cfg(not(feature = "finalization"))]
+        {
             deallocate_list(non_root_list);
-        } else {
-            // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
-            // next iteration of the loop, which will automatically check for resurrected objects
-            // using the same algorithm of the initial tracing. This makes it more difficult to
-            // create memory leaks accidentally using finalizers than in the previous implementation.
-            let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                let mut pc = pc.borrow_mut();
-
-                // pc is already marked PossibleCycles, while non_root_list is not.
-                // non_root_list have to be added to pc after having been marked.
-                // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
-                // append the other to it in O(1), since we already know the last element of pc from the marking.
-                // This avoids iterating unnecessarily both lists and the need to update many pointers.
-                mem::swap(&mut *pc, &mut non_root_list);
-                pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
-            });
         }
     }
-
-    // _drop_guard is dropped here, setting state.collecting to false
 }
 
 #[inline]
