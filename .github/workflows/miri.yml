@@ -7,7 +7,7 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  build:
+  test-with-miri:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -17,9 +17,11 @@ jobs:
           rustup toolchain install nightly --component miri
           rustup override set nightly
           cargo miri setup
-      - name: Run tests
+      - name: Run tests (no features)
+        run: cargo miri test --no-default-features -F pedantic-debug-assertions --verbose --workspace
+      - name: Run tests (default features)
         run: cargo miri test -F pedantic-debug-assertions --verbose --workspace
-      - name: Run full tests
+      - name: Run tests (feature full)
         run: cargo miri test -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Run tests with every feature
+      - name: Run tests (every feature)
         run: cargo miri test --all-features --verbose --workspace

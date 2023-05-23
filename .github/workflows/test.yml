@@ -1,4 +1,4 @@
-name: Build and Test
+name: Test
 
 on: [push, pull_request]
 
@@ -7,20 +7,24 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
-      - name: Build
+      - name: Build (no features)
+        run: cargo build --no-default-features -F pedantic-debug-assertions --verbose --workspace
+      - name: Run tests (no features)
+        run: cargo test --no-default-features -F pedantic-debug-assertions --verbose --workspace
+      - name: Build (default features)
         run: cargo build -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests
+      - name: Run tests (default features)
         run: cargo test -F pedantic-debug-assertions --verbose --workspace
-      - name: Build full
+      - name: Build (feature full)
         run: cargo build -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Run full tests
+      - name: Run tests (feature full)
         run: cargo test -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Build with every feature
+      - name: Build (every feature)
         run: cargo build --all-features --verbose --workspace
-      - name: Run tests with every feature
+      - name: Run tests (every feature)
         run: cargo test --all-features --verbose --workspace
