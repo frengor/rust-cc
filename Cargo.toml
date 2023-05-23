@@ -25,7 +25,7 @@ edition = "2021"
 
 [features]
 default = ["auto-collect", "finalization"]
-full = ["auto-collect", "finalization"]
+full = ["auto-collect", "finalization"] # Every feature except for "nightly" and "pedantic-debug-assertions"
 nightly = []
 auto-collect = []
 finalization = []
