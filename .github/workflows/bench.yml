@@ -36,6 +36,23 @@ jobs:
         run: |
           cargo update
           cargo bench -F full -q --bench bench > "${WORKSPACE}"/____results.txt
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          clean: false
+      - name: Bench base branch no finalization
+        run: |
+          cargo clean
+          cargo update
+          cargo bench --no-default-features -F auto-collect -q --bench bench > "${WORKSPACE}"/____old_results_no_finalization.txt
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          clean: false
+      - name: Bench head branch no finalization
+        run: |
+          cargo update
+          cargo bench --no-default-features -F auto-collect -q --bench bench > "${WORKSPACE}"/____results_no_finalization.txt
       - name: Write comment
         run: |
           {
@@ -47,6 +64,17 @@ jobs:
             echo ''
             cat "${WORKSPACE}"/____old_results.txt
             echo '</p></details>'
+            echo ''
+            echo '---'
+            echo ''
+            echo '<details><summary><strong>Results without finalization:</strong></summary><p>'
+            echo ''
+            cat "${WORKSPACE}"/____results_no_finalization.txt
+            echo ''
+            echo '<details><summary><strong>Old results without finalization:</strong></summary><p>'
+            echo ''
+            cat "${WORKSPACE}"/____old_results_no_finalization.txt
+            echo '</p></details></p></details>'
           } > "${WORKSPACE}"/__result.txt
       - uses: thollander/actions-comment-pull-request@v2.3.1
         with:
