@@ -34,71 +34,64 @@ thread_local! {
 }
 
 pub fn collect_cycles() {
-    if try_state(|state| state.is_collecting()).unwrap_or(true) {
-        return; // We're already collecting
-    }
+    let _ = try_state(|state| {
+        if state.is_collecting() {
+            return;
+        }
 
-    collect();
+        collect(state);
 
-    #[cfg(feature = "auto-collect")]
-    adjust_trigger_point();
+        #[cfg(feature = "auto-collect")]
+        adjust_trigger_point(state);
+    });
 }
 
 #[cfg(feature = "auto-collect")]
 #[inline(never)]
 pub(crate) fn trigger_collection() {
-    let should_collect = try_state(|state| {
-        !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false)
-    }).unwrap_or(false);
-
-    if should_collect {
-        collect();
-        adjust_trigger_point();
-    }
+    let _ = try_state(|state| {
+        if !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false) {
+            collect(state);
+            adjust_trigger_point(state);
+        }
+    });
 }
 
 #[cfg(feature = "auto-collect")]
-fn adjust_trigger_point() {
-    let _ = config::config(|config| try_state(|state| config.adjust(state)));
+fn adjust_trigger_point(state: &State) {
+    let _ = config::config(|config| config.adjust(state));
 }
 
-fn collect() {
-    // Used into try_state
-    #[inline(always)]
-    fn set_collecting(state: &State) {
-        state.set_collecting(true);
-        state.increment_execution_count();
+fn collect(state: &State) {
+    state.set_collecting(true);
+    state.increment_execution_count();
+
+    struct DropGuard<'a> {
+        state: &'a State,
     }
 
-    if try_state(set_collecting).is_err() {
-        // If state isn't accessible don't proceed with collection
-        return;
-    }
-
-    struct DropGuard;
-
-    impl Drop for DropGuard {
+    impl<'a> Drop for DropGuard<'a> {
+        #[inline]
         fn drop(&mut self) {
-            // Set state.collecting back to to false
-            replace_state_field!(__drop_impl DropGuard, set_collecting, false);
+            self.state.set_collecting(false);
         }
     }
 
-    let _drop_guard = DropGuard;
+    let _drop_guard = DropGuard { state };
 
     #[cfg(feature = "finalization")]
     while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
-        __collect();
+        __collect(state);
     }
     #[cfg(not(feature = "finalization"))]
     if let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
-        __collect();
+        __collect(state);
     }
 
     // _drop_guard is dropped here, setting state.collecting to false
 }
 
-fn __collect() {
+fn __collect(state: &State) {
     let mut non_root_list = List::new();
     {
         let mut root_list = List::new();
@@ -131,7 +124,7 @@ fn __collect() {
         {
             let mut has_finalized = false;
             {
-                let _finalizing_guard = replace_state_field!(finalizing, true);
+                let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
                 non_root_list.iter().for_each(|ptr| {
                     // SAFETY: ptr comes from non_root_list, so it is surely valid since lists contain only pointers to valid CcOnHeap<_>
@@ -144,7 +137,7 @@ fn __collect() {
             }
 
             if !has_finalized {
-                deallocate_list(non_root_list);
+                deallocate_list(non_root_list, state);
             } else {
                 // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
                 // next iteration of the loop, which will automatically check for resurrected objects
@@ -166,14 +159,14 @@ fn __collect() {
 
         #[cfg(not(feature = "finalization"))]
         {
-            deallocate_list(non_root_list);
+            deallocate_list(non_root_list, state);
         }
     }
 }
 
 #[inline]
-fn deallocate_list(to_deallocate_list: List) {
-    let _dropping_guard = replace_state_field!(dropping, true);
+fn deallocate_list(to_deallocate_list: List, state: &State) {
+    let _dropping_guard = replace_state_field!(dropping, true, state);
 
     // Drop every CcOnHeap before deallocating them (see comment below)
     to_deallocate_list.iter().for_each(|ptr| {
@@ -198,7 +191,7 @@ fn deallocate_list(to_deallocate_list: List) {
         //         and then the allocation gets deallocated immediately after.
         unsafe {
             let layout = ptr.as_ref().layout();
-            cc_dealloc(ptr, layout);
+            cc_dealloc(ptr, layout, state);
         }
     });
 

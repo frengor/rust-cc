@@ -135,53 +135,33 @@ pub fn execution_count() -> Result<usize, StateAccessError> {
 
 /// Utility macro used internally to implement drop guards that accesses the state
 macro_rules! replace_state_field {
-    (dropping, $value:expr) => {
-        $crate::state::replace_state_field!(__internal is_dropping, set_dropping, bool, $value)
+    (dropping, $value:expr, $state:ident) => {
+        $crate::state::replace_state_field!(__internal is_dropping, set_dropping, bool, $value, $state)
     };
-    (finalizing, $value:expr) => {
-        $crate::state::replace_state_field!(__internal is_finalizing, set_finalizing, bool, $value)
+    (finalizing, $value:expr, $state:ident) => {
+        $crate::state::replace_state_field!(__internal is_finalizing, set_finalizing, bool, $value, $state)
     };
-    (__internal $is_name:ident, $set_name:ident, $field_type:ty, $value:expr) => {
-        $crate::state::state(|state| {
-            let old_value: $field_type = $crate::state::State::$is_name(state);
-            $crate::state::State::$set_name(state, $value);
+    (__internal $is_name:ident, $set_name:ident, $field_type:ty, $value:expr, $state:ident) => {
+        {
+            let old_value: $field_type = $crate::state::State::$is_name($state);
+            $crate::state::State::$set_name($state, $value);
 
             #[must_use = "the drop guard shouldn't be dropped instantly"]
-            struct DropGuard {
+            struct DropGuard<'a> {
+                state: &'a $crate::state::State,
                 old_value: $field_type,
             }
 
-            impl ::std::ops::Drop for DropGuard {
+            impl<'a> ::std::ops::Drop for DropGuard<'a> {
                 #[inline]
                 fn drop(&mut self) {
-                    $crate::state::replace_state_field!(__drop_impl DropGuard, $set_name, self.old_value);
+                    $crate::state::State::$set_name(self.state, self.old_value);
                 }
             }
 
-            DropGuard { old_value }
-        })
-    };
-    (__drop_impl $struct_name:ident, $set_name:ident, $old_value:expr) => {
-        {
-            let res = $crate::state::try_state(|state| {
-                $crate::state::State::$set_name(state, $old_value);
-            });
-
-            if ::std::result::Result::is_err(&res) {
-                // If we cannot reset the internal state then abort, since continuing may lead to UB
-                // Note that this should never happen though!
-
-                #[cold]
-                #[inline(always)]
-                fn cannot_reset() {
-                    // Use catch_unwind to avoid panicking if writing to stderr fails, since we want to always abort here
-                    let _ = ::std::panic::catch_unwind(|| ::std::eprintln!("Couldn't reset state. This is (probably) a rust-cc bug, please report it at https://github.com/frengor/rust-cc/issues."));
-                    ::std::process::abort();
-                }
-
-                cannot_reset();
-            }
-        };
+            #[allow(clippy::redundant_field_names)]
+            DropGuard { state: $state, old_value }
+        }
     };
 }
 
@@ -194,39 +174,41 @@ mod tests {
 
     #[test]
     fn test_replace_state_field() {
-        // Test state.dropping = true
-        state(|state| state.set_dropping(true));
-        {
-            let _finalizing_guard = replace_state_field!(dropping, false);
-            state(|state| assert!(!state.is_dropping()));
-        }
-        state(|state| assert!(state.is_dropping()));
-
-        // Test state.dropping = false
-        state(|state| state.set_dropping(false));
-        {
-            let _dropping_guard = replace_state_field!(dropping, true);
-            state(|state| assert!(state.is_dropping()));
-        }
-        state(|state| assert!(!state.is_dropping()));
-
-        #[cfg(feature = "finalization")]
-        {
-            // Test state.finalizing = true
-            state(|state| state.set_finalizing(true));
+        state(|state| {
+            // Test state.dropping = true
+            state.set_dropping(true);
             {
-                let _finalizing_guard = replace_state_field!(finalizing, false);
-                state(|state| assert!(!state.is_finalizing()));
+                let _finalizing_guard = replace_state_field!(dropping, false, state);
+                assert!(!state.is_dropping());
             }
-            state(|state| assert!(state.is_finalizing()));
+            assert!(state.is_dropping());
 
-            // Test state.finalizing = false
-            state(|state| state.set_finalizing(false));
+            // Test state.dropping = false
+            state.set_dropping(false);
             {
-                let _finalizing_guard = replace_state_field!(finalizing, true);
-                state(|state| assert!(state.is_finalizing()));
+                let _dropping_guard = replace_state_field!(dropping, true, state);
+                assert!(state.is_dropping());
             }
-            state(|state| assert!(!state.is_finalizing()));
-        }
+            assert!(!state.is_dropping());
+
+            #[cfg(feature = "finalization")]
+            {
+                // Test state.finalizing = true
+                state.set_finalizing(true);
+                {
+                    let _finalizing_guard = replace_state_field!(finalizing, false, state);
+                    assert!(!state.is_finalizing());
+                }
+                assert!(state.is_finalizing());
+
+                // Test state.finalizing = false
+                state.set_finalizing(false);
+                {
+                    let _finalizing_guard = replace_state_field!(finalizing, true, state);
+                    assert!(state.is_finalizing());
+                }
+                assert!(!state.is_finalizing());
+            }
+        });
     }
 }

@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::counter_marker::{CounterMarker, Mark};
-use crate::state::{replace_state_field, state};
+use crate::state::{replace_state_field, state, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
@@ -108,7 +108,7 @@ impl<T: Trace + 'static> Cc<T> {
         unsafe {
             let t = ptr::read(self.inner().get_elem());
             let layout = self.inner().layout();
-            cc_dealloc(self.inner, layout);
+            let _ = try_state(|state| cc_dealloc(self.inner, layout, state));
             mem::forget(self); // Don't call drop on this Cc
             t
         }
@@ -300,34 +300,36 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
             remove_from_list(self.inner.cast());
 
-            let to_drop = if cfg!(feature = "finalization") && counter_marker.needs_finalization() {
-                // This cfg is necessary since the cfg! above still compiles the line below,
-                // however state doesn't contain the finalizing field when the finalization feature is off,
-                // so removing this cfg makes the crate to fail compilation
-                #[cfg(feature = "finalization")]
-                let _finalizing_guard = replace_state_field!(finalizing, true);
+            state(|state| {
+                let to_drop = if cfg!(feature = "finalization") && counter_marker.needs_finalization() {
+                    // This cfg is necessary since the cfg! above still compiles the line below,
+                    // however state doesn't contain the finalizing field when the finalization feature is off,
+                    // so removing this cfg makes the crate to fail compilation
+                    #[cfg(feature = "finalization")]
+                    let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
-                // Set finalized
-                counter_marker.set_finalized(true);
+                    // Set finalized
+                    counter_marker.set_finalized(true);
 
-                self.inner().get_elem().finalize();
-                self.strong_count() == 0
-                // _finalizing_guard is dropped here, resetting state.finalizing
-            } else {
-                true
-            };
+                    self.inner().get_elem().finalize();
+                    self.strong_count() == 0
+                    // _finalizing_guard is dropped here, resetting state.finalizing
+                } else {
+                    true
+                };
 
-            if to_drop {
-                let _dropping_guard = replace_state_field!(dropping, true);
-                let layout = self.inner().layout();
+                if to_drop {
+                    let _dropping_guard = replace_state_field!(dropping, true, state);
+                    let layout = self.inner().layout();
 
-                // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
-                unsafe {
-                    drop_in_place(self.inner().elem.get());
-                    cc_dealloc(self.inner, layout);
+                    // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
+                    unsafe {
+                        drop_in_place(self.inner().elem.get());
+                        cc_dealloc(self.inner, layout, state);
+                    }
+                    // _dropping_guard is dropped here, resetting state.dropping
                 }
-                // _dropping_guard is dropped here, resetting state.dropping
-            }
+            });
         } else {
             // SAFETY: we checked that inner is valid
             // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
