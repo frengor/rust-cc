@@ -4,9 +4,9 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use crate::state::State;
 use crate::trace::Trace;
 use crate::{state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
+use crate::state::state;
 
 mod bench_code;
 mod cc;
@@ -18,7 +18,7 @@ pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
         pc.replace(List::new());
     });
-    state(|state| *state = State::default());
+    state::reset_state();
 
     #[cfg(feature = "auto-collect")]
     {

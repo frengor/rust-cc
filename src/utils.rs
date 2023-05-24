@@ -1,7 +1,8 @@
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::ptr::NonNull;
 
-use crate::{state, CcOnHeap, Trace};
+use crate::{CcOnHeap, Trace};
+use crate::state::state;
 
 #[inline]
 pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout) -> NonNull<CcOnHeap<T>> {

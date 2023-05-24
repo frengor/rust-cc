@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 use crate::cc::CcOnHeap;
 use crate::counter_marker::Mark;
 use crate::list::List;
-use crate::state::{replace_state_field, state, State, try_state};
+use crate::state::{replace_state_field, State, try_state};
 use crate::trace::ContextInner;
 use crate::utils::*;
 
@@ -34,7 +34,7 @@ thread_local! {
 }
 
 pub fn collect_cycles() {
-    if state(|state| state.is_collecting()) {
+    if try_state(|state| state.is_collecting()).unwrap_or(true) {
         return; // We're already collecting
     }
 
@@ -47,9 +47,9 @@ pub fn collect_cycles() {
 #[cfg(feature = "auto-collect")]
 #[inline(never)]
 pub(crate) fn trigger_collection() {
-    let should_collect = state(|state| {
+    let should_collect = try_state(|state| {
         !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false)
-    });
+    }).unwrap_or(false);
 
     if should_collect {
         collect();
@@ -59,12 +59,13 @@ pub(crate) fn trigger_collection() {
 
 #[cfg(feature = "auto-collect")]
 fn adjust_trigger_point() {
-    let _ = config::config(|config| state(|state| config.adjust(state)));
+    let _ = config::config(|config| try_state(|state| config.adjust(state)));
 }
 
 fn collect() {
     // Used into try_state
-    fn set_collecting(state: &mut State) {
+    #[inline(always)]
+    fn set_collecting(state: &State) {
         state.set_collecting(true);
         state.increment_execution_count();
     }
