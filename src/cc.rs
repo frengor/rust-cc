@@ -3,7 +3,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ops::Deref;
-use std::ptr::{self, drop_in_place, NonNull};
+use std::ptr::{self, addr_of, drop_in_place, NonNull};
 use std::rc::Rc;
 #[cfg(feature = "nightly")]
 use std::{
@@ -63,7 +63,7 @@ impl<T: Trace + 'static> Cc<T> {
         #[cfg(feature = "auto-collect")]
         super::trigger_collection();
 
-        let mut invalid = CcOnHeap::<T>::new_invalid();
+        let mut invalid: NonNull<CcOnHeap<MaybeUninit<T>>> = CcOnHeap::<T>::new_invalid();
         let cc = Cc {
             inner: invalid.cast(),
             _phantom: PhantomData,
@@ -75,7 +75,7 @@ impl<T: Trace + 'static> Cc<T> {
         }
 
         // Set valid
-        cc.inner().counter_marker().mark(Mark::NonMarked);
+        cc.counter_marker().mark(Mark::NonMarked);
 
         // Return cc, since it is now valid
         cc
@@ -97,7 +97,7 @@ impl<T: Trace + 'static> Cc<T> {
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            !self.inner().counter_marker().is_traced_or_invalid(),
+            !self.counter_marker().is_traced_or_invalid(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
@@ -196,7 +196,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        self.inner().counter_marker().counter()
+        self.counter_marker().counter()
     }
 
     #[inline]
@@ -206,7 +206,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     #[inline]
     pub fn is_valid(&self) -> bool {
-        self.inner().is_valid()
+        self.counter_marker().is_valid()
     }
 
     #[cfg(feature = "finalization")]
@@ -215,28 +215,28 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     pub fn finalize_again(&mut self) {
         assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
 
-        self.inner().counter_marker().set_finalized(false);
+        self.counter_marker().set_finalized(false);
     }
 
     #[cfg(feature = "finalization")]
     #[inline]
     pub fn already_finalized(&self) -> bool {
-        !self.inner().counter_marker().needs_finalization()
+        !self.counter_marker().needs_finalization()
     }
 
-    /// Note: don't access self.inner().elem if CcOnHeap is not valid!
+    #[inline(always)]
+    fn counter_marker(&self) -> &CounterMarker {
+        // SAFETY: It's always safe to access the counter_marker if we're not dereferencing anything else
+        unsafe {
+            &*addr_of!((*self.inner.as_ptr()).counter_marker)
+        }
+    }
+
+    /// Note: don't call if CcOnHeap is not valid!
     #[inline(always)]
     fn inner(&self) -> &CcOnHeap<T> {
-        // If Cc is alive then we can always access the underlying CcOnHeap
+        // SAFETY: since Cc is alive and the underlying CcOnHeap is valid then we can access it
         unsafe { self.inner.as_ref() }
-    }
-
-    /// Note: don't access self.inner_mut().elem if CcOnHeap is not valid!
-    #[inline(always)]
-    // Not currently used
-    fn _inner_mut(&mut self) -> &mut CcOnHeap<T> {
-        // If Cc is alive then we can always access the underlying CcOnHeap
-        unsafe { self.inner.as_mut() }
     }
 }
 
@@ -248,7 +248,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
             panic!("Cannot clone while tracing!");
         }
 
-        if self.inner().counter_marker().increment_counter().is_err() {
+        if self.counter_marker().increment_counter().is_err() {
             panic!("Too many references has been created to a single Cc");
         }
 
@@ -283,7 +283,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
-        let counter_marker = self.inner().counter_marker();
+        let counter_marker = self.counter_marker();
 
         // Always decrement the counter
         let res = counter_marker.decrement_counter();
@@ -295,7 +295,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
             return;
         }
 
-        if self.strong_count() == 0 {
+        if counter_marker.counter() == 0 {
             // Only us have a pointer to this allocation, deallocate!
 
             remove_from_list(self.inner.cast());
@@ -312,7 +312,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     counter_marker.set_finalized(true);
 
                     self.inner().get_elem().finalize();
-                    self.strong_count() == 0
+                    counter_marker.counter() == 0
                     // _finalizing_guard is dropped here, resetting state.finalizing
                 } else {
                     true
