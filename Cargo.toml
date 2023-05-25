@@ -14,7 +14,7 @@ edition.workspace = true
 members = ["derive"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 authors = ["fren_gor <goro@frengor.com>"]
 repository = "https://github.com/frengor/rust-cc"
 categories = ["memory-management"]
