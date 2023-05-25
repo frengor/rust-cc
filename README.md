@@ -2,7 +2,7 @@
 
 A fast cycle collector for Rust programs with built-in support for creating cycles of references.
 
-This crate provides a `Cc` (cycle collected) smart pointer, which is basically a `Rc` which automatically detects and 
+This crate provides a `Cc` (Cycle Collected) smart pointer, which is basically a `Rc` which automatically detects and 
 deallocates cycles of references. If there are no cycles of references, then `Cc` behaves like `Rc` and deallocates 
 immediately when the reference counter drops to zero.
 
@@ -81,13 +81,14 @@ fn main() {
 
 ## The collection algorithm
 
-The main idea is to discover the roots making use of the information contained in the reference counter,
-instead of having them from another source.  
+The main idea is to discover the roots (i.e. objects which are pointed to by a pointer on the stack) making use of
+the information contained in the reference counter, instead of having them from another source.  
 
-Usually, in garbage collected languages, the runtime has always a way to know which objects are roots (i.e. objects 
-accessible from a pointer on the stack). However, since Rust has no runtime, this information isn't available. This way,
-garbage collectors implemented in Rust for Rust programs have a very difficult time figuring out which objects can be 
-deallocated and which cannot because they can still be accessed by the program.
+Usually, in garbage collected languages, the runtime has always a way to know which objects are roots (knowing the roots allows
+the garbage collector to know which objects are still accessible by the program and therefore which can and cannot be deallocated).  
+However, since Rust has no runtime, this information isn't available! For this reason, garbage collectors implemented
+in Rust for Rust programs have a very difficult time figuring out which objects can be deallocated and which
+cannot because they can still be accessed by the program.
 
 `rust-cc`, using the reference counters, is able to find the roots at runtime while collecting, eliminating the need to
 constantly keep track of the roots. This is also the reason why the standard `RefCell` can be safely used inside
@@ -100,7 +101,7 @@ If you're interested in reading the source code, the algorithm is described more
 
 ## Benchmarks
 
-Benchmarks can be found at <https://github.com/frengor/rust-cc-benchmarks>.
+Benchmarks comparing `rust-cc` to other collectors can be found at <https://github.com/frengor/rust-cc-benchmarks>.
 
 ## License
 
