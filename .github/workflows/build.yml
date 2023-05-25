@@ -1,0 +1,29 @@
+name: Build
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  build-on-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: |
+          cargo build --no-default-features --verbose --workspace
+          cargo build --verbose --workspace
+          cargo build -F full --verbose --workspace
+  build-on-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Build
+        run: |
+          cargo build --no-default-features -F nightly --verbose --workspace
+          cargo build -F nightly --verbose --workspace
+          cargo build -F full,nightly --verbose --workspace

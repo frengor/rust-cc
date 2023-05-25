@@ -90,6 +90,7 @@ fn useless_cyclic() {
     collect_cycles();
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_finalization() {
     thread_local! {
@@ -335,12 +336,15 @@ fn test_finalize_drop() {
     drop(cc);
 
     collect_cycles();
-    assert!(FINALIZED.with(|cell| cell.get()));
-    assert!(FINALIZEDB.with(|cell| cell.get()));
+    if cfg!(feature = "finalization") {
+        assert!(FINALIZED.with(|cell| cell.get()));
+        assert!(FINALIZEDB.with(|cell| cell.get()));
+    }
     assert!(DROPPED.with(|cell| cell.get()));
     assert!(DROPPEDB.with(|cell| cell.get()));
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn finalization_test() {
     struct Circular {

@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::mem;
 use std::ptr::NonNull;
 
 use crate::{CcOnHeap, Mark};
@@ -121,6 +120,7 @@ impl List {
 
     /// The elements in `to_append` are assumed to be already marked with `mark` mark.
     #[inline]
+    #[cfg(feature = "finalization")]
     pub(crate) fn mark_self_and_append(&mut self, mark: Mark, to_append: List) {
         if let Some(mut prev) = self.first {
             for elem in self.iter() {
@@ -139,7 +139,7 @@ impl List {
             self.first = to_append.first;
             // to_append.first.prev is already None
         }
-        mem::forget(to_append); // Don't run to_append destructor
+        std::mem::forget(to_append); // Don't run to_append destructor
     }
 }
 

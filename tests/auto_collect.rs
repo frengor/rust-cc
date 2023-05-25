@@ -1,6 +1,6 @@
 #![cfg(feature = "auto-collect")]
 
-use rust_cc::state::execution_count;
+use rust_cc::state::executions_count;
 use rust_cc::{collect_cycles, Cc, Context, Finalize, Trace};
 use rust_cc::config::config;
 
@@ -38,15 +38,15 @@ fn test_auto_collect() {
             _big: Default::default(),
         });
 
-        let executions_count = execution_count();
+        let executions_counter = executions_count().unwrap();
         drop(_traceable);
-        assert_eq!(executions_count, execution_count(), "Collected but shouldn't have collected.");
+        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
 
         let _ = Cc::new(Traceable {
             inner: None,
             _big: Default::default(),
         }); // Collection should be triggered by allocations
-        assert_ne!(executions_count, execution_count(), "Didn't collected");
+        assert_ne!(executions_counter, executions_count().unwrap(), "Didn't collected");
     }
     collect_cycles(); // Make sure to don't leak test's memory
 }
@@ -88,7 +88,7 @@ fn test_disable_auto_collect() {
     impl Finalize for Traceable {}
 
     {
-        let executions_count = execution_count();
+        let executions_counter = executions_count().unwrap();
         let _traceable = Cc::<Traceable>::new_cyclic(|cc| Traceable {
             inner: Some(Cc::new(Traceable {
                 inner: Some(cc.clone()),
@@ -97,15 +97,15 @@ fn test_disable_auto_collect() {
             _big: Default::default(),
         });
 
-        assert_eq!(executions_count, execution_count(), "Collected but shouldn't have collected.");
+        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
         drop(_traceable);
-        assert_eq!(executions_count, execution_count(), "Collected but shouldn't have collected.");
+        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
 
         let _ = Cc::new(Traceable {
             inner: None,
             _big: Default::default(),
         }); // Collection should be triggered by allocations
-        assert_eq!(executions_count, execution_count(), "Collected but shouldn't have collected.");
+        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
     }
     collect_cycles(); // Make sure to don't leak test's memory
 }

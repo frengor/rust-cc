@@ -140,8 +140,6 @@ fn test_cc() {
 #[cfg(feature = "nightly")]
 #[test]
 fn test_trait_object() {
-    use std::mem::ManuallyDrop;
-
     reset_state();
 
     thread_local! {
@@ -196,9 +194,8 @@ fn test_trait_object() {
         let inner = cc.deref();
         inner.hello();
 
-        // Use ManuallyDrop to don't run lists' destructor
-        let mut l1 = ManuallyDrop::new(List::new());
-        let mut l2 = ManuallyDrop::new(List::new());
+        let mut l1 = List::new();
+        let mut l2 = List::new();
 
         cc.trace(&mut Context::new(ContextInner::Counting {
             root_list: &mut l1,
@@ -218,6 +215,8 @@ fn test_trait_object() {
         TRACED.with(|dropped| dropped.get()),
         "MyTraitObject hasn't been traced"
     );
+
+    #[cfg(feature = "finalization")]
     assert!(
         FINALIZED.with(|dropped| dropped.get()),
         "MyTraitObject hasn't been traced"
