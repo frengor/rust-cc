@@ -64,7 +64,7 @@ fn adjust_trigger_point(state: &State) {
 
 fn collect(state: &State) {
     state.set_collecting(true);
-    state.increment_execution_count();
+    state.increment_executions_count();
 
     struct DropGuard<'a> {
         state: &'a State,

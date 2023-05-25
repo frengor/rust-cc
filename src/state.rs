@@ -35,7 +35,7 @@ pub(crate) fn reset_state() {
 
         state.dropping.set(false);
         state.allocated_bytes.set(0);
-        state.execution_counter.set(0);
+        state.executions_counter.set(0);
     });
 }
 
@@ -48,7 +48,7 @@ pub(crate) struct State {
 
     dropping: Cell<bool>,
     allocated_bytes: Cell<usize>,
-    execution_counter: Cell<usize>,
+    executions_counter: Cell<usize>,
 }
 
 impl State {
@@ -68,13 +68,13 @@ impl State {
     }
 
     #[inline]
-    pub(crate) fn execution_count(&self) -> usize {
-        self.execution_counter.get()
+    pub(crate) fn executions_count(&self) -> usize {
+        self.executions_counter.get()
     }
 
     #[inline]
-    pub(super) fn increment_execution_count(&self) {
-        self.execution_counter.set(self.execution_counter.get() + 1);
+    pub(super) fn increment_executions_count(&self) {
+        self.executions_counter.set(self.executions_counter.get() + 1);
     }
 
     #[inline]
@@ -129,8 +129,8 @@ pub fn allocated_bytes() -> Result<usize, StateAccessError> {
 }
 
 #[inline]
-pub fn execution_count() -> Result<usize, StateAccessError> {
-    STATE.try_with(|state| Ok(state.execution_count()))?
+pub fn executions_count() -> Result<usize, StateAccessError> {
+    STATE.try_with(|state| Ok(state.executions_count()))?
 }
 
 /// Utility macro used internally to implement drop guards that accesses the state
