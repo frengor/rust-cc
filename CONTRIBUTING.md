@@ -42,8 +42,11 @@ Therefore, they undergo two tracing passes:
 
 ### Future improvements
 
-Apart from the fix already mentioned in the note above, there are another additions which would be nice to have:
+If you're interested in the project, there are some additions which would be nice to have:
 - weak pointers
 - cleaners (https://docs.oracle.com/javase/9/docs/api/java/lang/ref/Cleaner.html)
-- weak pointers, cleaners and finalizers as optional features to explicitly enable
+- weak pointers and cleaners as optional features to explicitly enable
 - `Cc::new_cyclic` as optional feature (enabled by default) maybe?
+
+**Already done:**
+- finalization as optional feature
