@@ -43,6 +43,7 @@ pub trait Finalize {
 ///
 ///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory), but it's safe.
 ///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
+///   * The [`trace`] function *must not* create a new [`Cc`].
 ///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move or access any [`Cc`].
 ///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
 ///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
@@ -105,10 +106,9 @@ pub trait Finalize {
 /// unsafe impl Trace for ErroneousExample {
 ///     fn trace(&self, ctx: &mut Context) {
 ///         self.cc_elem.trace(ctx); // Correct call
-///         self.my_struct_elem.trace(ctx); // Useless since MyStruct is a ZST, but still fine
+///         self.my_struct_elem.trace(ctx); // Correct call, although useless since MyStruct doesn't contain any Cc
 ///
-///         let new_cc = Cc::new(10); // This will panic to avoid undefined behavior! ⚠️
-///         new_cc.trace(ctx); // If the previous line didn't panic, this call would have produced undefined behavior
+///         let new_cc = Cc::new(10); // This is undefined behavior! ⚠️
 ///
 ///         self.a_cc_struct_elem.trace(ctx); // Correct call
 ///         self.a_cc_struct_elem.trace(ctx); // Double tracing of the same Cc, undefined behavior! ⚠️

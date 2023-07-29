@@ -37,6 +37,7 @@ impl<T: Trace + 'static> Cc<T> {
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot create a new Cc while tracing!");
         }
@@ -56,6 +57,7 @@ impl<T: Trace + 'static> Cc<T> {
     where
         F: FnOnce(&Cc<T>) -> T,
     {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot create a new Cc while tracing!");
         }
@@ -244,6 +246,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot clone while tracing!");
         }
@@ -268,6 +271,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
     #[inline]
     #[track_caller]
     fn deref(&self) -> &Self::Target {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot deref while tracing!");
         }
