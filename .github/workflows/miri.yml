@@ -17,11 +17,8 @@ jobs:
           rustup toolchain install nightly --component miri
           rustup override set nightly
           cargo miri setup
-      - name: Run tests (no features)
-        run: cargo miri test --no-default-features -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (default features)
-        run: cargo miri test -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (feature full)
-        run: cargo miri test -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (every feature)
-        run: cargo miri test --all-features --verbose --workspace
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Run tests
+        run: cargo hack miri test --feature-powerset --skip nightly --verbose --workspace
+      - name: Run tests (nightly)
+        run: cargo hack miri test --feature-powerset --verbose --workspace -F nightly

@@ -25,7 +25,6 @@ edition = "2021"
 
 [features]
 default = ["auto-collect", "finalization"]
-full = ["auto-collect", "finalization"] # Every feature except for "nightly" and "pedantic-debug-assertions"
 nightly = []
 auto-collect = []
 finalization = []
@@ -41,3 +40,7 @@ rand = "0.8.3"
 [[bench]]
 name = "bench"
 harness = false
+
+[package.metadata.cargo-all-features]
+# Exclude certain features from the build matrix
+denylist = ["full"]

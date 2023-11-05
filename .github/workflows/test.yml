@@ -12,19 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
-      - name: Build (no features)
-        run: cargo build --no-default-features -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (no features)
-        run: cargo test --no-default-features -F pedantic-debug-assertions --verbose --workspace
-      - name: Build (default features)
-        run: cargo build -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (default features)
-        run: cargo test -F pedantic-debug-assertions --verbose --workspace
-      - name: Build (feature full)
-        run: cargo build -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (feature full)
-        run: cargo test -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Build (every feature)
-        run: cargo build --all-features --verbose --workspace
-      - name: Run tests (every feature)
-        run: cargo test --all-features --verbose --workspace
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Run tests
+        run: cargo hack test --feature-powerset --skip nightly --clean-per-run --verbose --workspace
+      - name: Run tests (nightly)
+        run: cargo hack test --feature-powerset --clean-per-run --verbose --workspace -F nightly

@@ -1,0 +1,29 @@
+name: Check and Clippy
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  on-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Check and Clippy
+        run: |
+          cargo hack check --feature-powerset --skip nightly --clean-per-run --verbose --workspace
+          cargo hack clippy --feature-powerset --skip nightly --clean-per-run --verbose --workspace -- -D warnings
+  on-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Check and Clippy (nightly)
+        run: |
+          cargo hack check --feature-powerset --clean-per-run --verbose --workspace -F nightly
+          cargo hack clippy --feature-powerset --clean-per-run --verbose --workspace -F nightly -- -D warnings

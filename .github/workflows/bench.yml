@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
           cargo update
-          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____old_results.txt
+          cargo bench -q --bench bench > "${WORKSPACE}"/____old_results.txt
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.ref }}
@@ -35,7 +35,7 @@ jobs:
       - name: Bench head branch
         run: |
           cargo update
-          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____results.txt
+          cargo bench -q --bench bench > "${WORKSPACE}"/____results.txt
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.base.ref }}
