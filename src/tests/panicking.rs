@@ -4,7 +4,7 @@ use std::mem;
 use crate::tests::{assert_state_not_collecting, reset_state};
 use crate::{collect_cycles, Cc, Context, Finalize, Trace};
 
-fn register_panicking<T: Trace>(cc: &Cc<T>) {
+fn register_panicking<T: Trace>(#[allow(unused_variables)] cc: &Cc<T>) { // The unused_variables warning is triggered when not running on Miri
     #[cfg(miri)]
     extern "Rust" {
         /// From Miri documentation:<br>
