@@ -104,7 +104,7 @@ impl<T: Trace + 'static> Cc<T> {
         // Make sure self is not into POSSIBLE_CYCLES before deallocating
         remove_from_list(self.inner.cast());
 
-        // SAFETY: self is unique, valid and is not inside any list
+        // SAFETY: self is unique and is not inside any list
         unsafe {
             let t = ptr::read(self.inner().get_elem());
             let layout = self.inner().layout();
@@ -239,7 +239,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
 
         remove_from_list(self.inner.cast());
 
-        // It's always safe to clone a Cc, even if the underlying CcOnHeap is invalid
+        // It's always safe to clone a Cc
         Cc {
             inner: self.inner,
             _phantom: PhantomData,
@@ -303,7 +303,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     let _dropping_guard = replace_state_field!(dropping, true, state);
                     let layout = self.inner().layout();
 
-                    // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
+                    // SAFETY: we're the only one to have a pointer to this allocation
                     unsafe {
                         drop_in_place(self.inner().elem.get());
                         cc_dealloc(self.inner, layout, state);
@@ -313,7 +313,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
             });
         } else {
             // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
-            unsafe { add_to_list(self.inner.cast()) };
+            add_to_list(self.inner.cast());
         }
     }
 }
@@ -322,10 +322,8 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        unsafe {
-            if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().get_elem().trace(ctx);
-            }
+        if CcOnHeap::trace(self.inner.cast(), ctx) {
+            self.inner().get_elem().trace(ctx);
         }
     }
 }
@@ -435,42 +433,37 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
 
 #[inline]
 pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
-    unsafe {
-        let counter_marker = ptr.as_ref().counter_marker();
+    let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
-        // Check if ptr is in possible_cycles list. Note that if ptr points to an invalid CcOnHeap<_>,
-        // then the if guard should never be true, since it is always marked as Mark::Invalid.
-        // This is also the reason why this function is not marked as unsafe.
-        if counter_marker.is_in_possible_cycles() {
-            // ptr is in the list, remove it
-            let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                let mut list = pc.borrow_mut();
-                // Confirm is_in_possible_cycles() in debug builds
-                #[cfg(feature = "pedantic-debug-assertions")]
-                debug_assert!(list.contains(ptr));
-
-                counter_marker.mark(Mark::NonMarked);
-                list.remove(ptr);
-            });
-        } else {
-            // ptr is not in the list
-
-            // Confirm !is_in_possible_cycles() in debug builds.
-            // This is safe to do since we're not putting the CcOnHeap into the list
+    // Check if ptr is in possible_cycles list
+    if counter_marker.is_in_possible_cycles() {
+        // ptr is in the list, remove it
+        let _ = POSSIBLE_CYCLES.try_with(|pc| {
+            let mut list = pc.borrow_mut();
+            // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert! {
-                POSSIBLE_CYCLES.try_with(|pc| {
-                    !pc.borrow().contains(ptr)
-                }).unwrap_or(true)
-            };
-        }
+            debug_assert!(list.contains(ptr));
+
+            counter_marker.mark(Mark::NonMarked);
+            list.remove(ptr);
+        });
+    } else {
+        // ptr is not in the list
+
+        // Confirm !is_in_possible_cycles() in debug builds.
+        // This is safe to do since we're not putting the CcOnHeap into the list
+        #[cfg(feature = "pedantic-debug-assertions")]
+        debug_assert! {
+            POSSIBLE_CYCLES.try_with(|pc| {
+                !pc.borrow().contains(ptr)
+            }).unwrap_or(true)
+        };
     }
 }
 
-/// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
 #[inline]
-pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
-    let counter_marker = ptr.as_ref().counter_marker();
+pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
+    let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
         let mut list = pc.borrow_mut();
@@ -502,52 +495,51 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
 
 // Functions in common between every CcOnHeap<_>
 impl CcOnHeap<()> {
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
-    pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
-    }
-
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
-    #[cfg(feature = "finalization")]
-    #[inline]
-    pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
-        if ptr.as_ref().counter_marker().needs_finalization() {
-            // Set finalized
-            ptr.as_ref().counter_marker().set_finalized(true);
-
-            CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
-            true
-        } else {
-            false
+    pub(super) fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+        unsafe {
+            CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
         }
     }
 
-    /// SAFETY: `drop_in_place` conditions must be true and ptr must be pointing to a valid CcOnHeap<_>.
-    ///         More formally, `ptr.as_ref().is_valid()` must return `true`.
+    #[cfg(feature = "finalization")]
+    #[inline]
+    pub(super) fn finalize_inner(ptr: NonNull<Self>) -> bool {
+        unsafe {
+            if ptr.as_ref().counter_marker().needs_finalization() {
+                // Set finalized
+                ptr.as_ref().counter_marker().set_finalized(true);
+
+                CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
         CcOnHeap::get_traceable(ptr).as_mut().drop_elem();
     }
 
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
-    unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
+    fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
         #[cfg(feature = "nightly")]
-        {
+        unsafe {
             let vtable = ptr.as_ref().vtable;
             NonNull::from_raw_parts(ptr.cast(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
-        {
+        unsafe {
             ptr.as_ref().fat_ptr
         }
     }
 
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
-    pub(super) unsafe fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        let counter_marker = ptr.as_ref().counter_marker();
+    pub(super) fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting { root_list, .. } => {
                 // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
@@ -573,8 +565,6 @@ impl CcOnHeap<()> {
         //
         // This function is called from collect_cycles(), which doesn't know the
         // exact type of the element inside CcOnHeap, so trace it using the vtable
-        //
-        // SAFETY: we require that ptr points to a valid CcOnHeap<_>
         CcOnHeap::trace_inner(ptr, ctx);
     }
 
@@ -583,17 +573,15 @@ impl CcOnHeap<()> {
     /// This function returns a `bool` instead of directly tracing the element inside the CcOnHeap, since this way
     /// we can avoid using the vtable most of the times (the responsibility of tracing the inner element is passed
     /// to the caller, which *might* have more information on the type inside CcOnHeap than us).
-    ///
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline(never)] // Don't inline this function, it's huge
     #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
-    unsafe fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
+    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         #[inline(always)]
         fn non_root(counter_marker: &CounterMarker) -> bool {
             counter_marker.tracing_counter() == counter_marker.counter()
         }
 
-        let counter_marker = ptr.as_ref().counter_marker();
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting {
                 root_list,
