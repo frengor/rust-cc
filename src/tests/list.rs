@@ -151,7 +151,6 @@ fn test_for_each_clearing_panic() {
 
         let counter_marker = counter_marker(it);
 
-        assert!(counter_marker.is_valid());
         assert!(counter_marker.is_not_marked());
         assert!(!counter_marker.is_in_possible_cycles());
     }

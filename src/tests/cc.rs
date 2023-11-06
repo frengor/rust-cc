@@ -1,6 +1,4 @@
 use std::mem::MaybeUninit;
-use std::ops::Deref;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::*;
 use crate::*;
@@ -223,7 +221,7 @@ fn test_trait_object() {
     );
 }
 
-#[test]
+/*#[test]
 fn test_cyclic() {
     reset_state();
 
@@ -282,14 +280,14 @@ fn test_cyclic() {
 
     drop(cc);
     collect_cycles();
-}
+}*/
 
 #[test]
 fn test_cyclic_finalization_aliasing() {
     reset_state();
 
     struct Circular {
-        cc: Cc<Circular>,
+        cc: RefCell<Option<Cc<Circular>>>,
     }
 
     unsafe impl Trace for Circular {
@@ -304,15 +302,20 @@ fn test_cyclic_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.cc.cc.cc.cc.strong_count() >= 0);
+            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
         }
     }
 
-    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-        cc: Cc::new(Circular {
-            cc: cc.clone(),
-        }),
-    });
+    {
+        let cc = Cc::new(Circular {
+            cc: RefCell::new(None),
+        });
+
+        *cc.cc.borrow_mut() = Some(Cc::new(Circular {
+            cc: RefCell::new(Some(cc.clone())),
+        }));
+    }
+
     collect_cycles();
 }
 
@@ -321,7 +324,7 @@ fn test_self_loop_finalization_aliasing() {
     reset_state();
 
     struct Circular {
-        cc: Cc<Circular>,
+        cc: RefCell<Option<Cc<Circular>>>,
     }
 
     unsafe impl Trace for Circular {
@@ -336,13 +339,17 @@ fn test_self_loop_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.cc.cc.cc.strong_count() >= 0);
+            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
         }
     }
 
-    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-        cc: cc.clone(),
-    });
+    {
+        let cc = Cc::new(Circular {
+            cc: RefCell::new(None),
+        });
+        *cc.cc.borrow_mut() = Some(cc.clone());
+    }
+
     collect_cycles();
 }
 

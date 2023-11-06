@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::mem;
 
 use crate::tests::{assert_state_not_collecting, reset_state};
@@ -13,8 +13,6 @@ fn register_panicking<T: Trace>(cc: &Cc<T>) {
         /// considered leaking even if it still exists when the program terminates._<br>
         fn miri_static_root(ptr: *const u8);
     }
-
-    assert!(cc.is_valid());
 
     #[cfg(miri)]
     // Use miri_static_root to avoid failures caused by leaks. Leaks are expected,
@@ -56,7 +54,7 @@ struct Panicking {
     panic_on_trace: Cell<bool>,
     panic_on_finalize: Cell<bool>,
     panic_on_drop: Cell<bool>,
-    cc: Cc<Panicking>,
+    cc: RefCell<Option<Cc<Panicking>>>,
 }
 
 unsafe impl Trace for Panicking {
@@ -95,14 +93,15 @@ fn test_panicking_tracing_counting() {
     reset_state();
 
     {
-        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let cc = Cc::new(Panicking {
             trace_counter: Cell::new(0),
             panic_on_trace: Cell::new(true),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(false),
-            cc: cc.clone(),
-        }));
-
+            cc: RefCell::new(None),
+        });
+        *cc.cc.borrow_mut() = Some(cc.clone());
+        register_panicking(&cc);
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -114,21 +113,22 @@ fn test_panicking_tracing_root() {
 
     // Leave a root alive to trigger root tracing
     let _root = {
-        let root = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let root = Cc::new(Panicking {
             trace_counter: Cell::new(1),
             panic_on_trace: Cell::new(true),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(false),
-            cc: Cc::new(Panicking {
-                trace_counter: Cell::new(usize::MAX),
-                panic_on_trace: Cell::new(false),
-                panic_on_finalize: Cell::new(false),
-                panic_on_drop: Cell::new(false),
-                cc: cc.clone(),
-            }),
+            cc: RefCell::new(None),
         });
+        *root.cc.borrow_mut() = Some(Cc::new(Panicking {
+            trace_counter: Cell::new(usize::MAX),
+            panic_on_trace: Cell::new(false),
+            panic_on_finalize: Cell::new(false),
+            panic_on_drop: Cell::new(false),
+            cc: RefCell::new(Some(root.clone())),
+        }));
         register_panicking(&root);
-        register_panicking(&root.cc);
+        register_panicking(root.cc.borrow().as_ref().unwrap());
         #[allow(clippy::redundant_clone)]
         root.clone()
     };
@@ -141,13 +141,15 @@ fn test_panicking_finalize() {
     reset_state();
 
     {
-        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let cc = Cc::new(Panicking {
             trace_counter: Cell::new(usize::MAX),
             panic_on_trace: Cell::new(false),
             panic_on_finalize: Cell::new(true),
             panic_on_drop: Cell::new(false),
-            cc: cc.clone(),
-        }));
+            cc: RefCell::new(None),
+        });
+        *cc.cc.borrow_mut() = Some(cc.clone());
+        register_panicking(&cc);
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -159,7 +161,7 @@ fn test_panicking_drop() {
 
     // Cannot use Panicking since Panicking implements Finalize
     struct DropPanicking {
-        cyclic: Cc<DropPanicking>,
+        cyclic: RefCell<Option<Cc<DropPanicking>>>,
     }
 
     unsafe impl Trace for DropPanicking {
@@ -178,7 +180,11 @@ fn test_panicking_drop() {
     }
 
     {
-        register_panicking(&Cc::<DropPanicking>::new_cyclic(|cc| DropPanicking { cyclic: cc.clone() }));
+        let cc = Cc::new(DropPanicking {
+            cyclic: RefCell::new(None),
+        });
+        *cc.cyclic.borrow_mut() = Some(cc.clone());
+        register_panicking(&cc);
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -189,13 +195,15 @@ fn test_panicking_drop_and_finalize() {
     reset_state();
 
     {
-        register_panicking(&Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let cc = Cc::new(Panicking {
             trace_counter: Cell::new(usize::MAX),
             panic_on_trace: Cell::new(false),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(true),
-            cc: cc.clone(),
-        }));
+            cc: RefCell::new(None),
+        });
+        *cc.cc.borrow_mut() = Some(cc.clone());
+        register_panicking(&cc);
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -213,22 +221,23 @@ fn test_panicking_tracing_drop() {
         // call will panic, which is during dropping tracing
         const CELL_VALUE: usize = 1;
 
-        let root = Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let root = Cc::new(Panicking {
             trace_counter: Cell::new(CELL_VALUE),
             panic_on_trace: Cell::new(true),
             panic_on_finalize: Cell::new(false),
             panic_on_drop: Cell::new(false),
-            cc: Cc::new(Panicking {
-                trace_counter: Cell::new(CELL_VALUE),
-                panic_on_trace: Cell::new(true),
-                panic_on_finalize: Cell::new(false),
-                panic_on_drop: Cell::new(false),
-                cc: cc.clone(),
-            }),
+            cc: RefCell::new(None),
         });
+        *root.cc.borrow_mut() = Some(Cc::new(Panicking {
+            trace_counter: Cell::new(CELL_VALUE),
+            panic_on_trace: Cell::new(true),
+            panic_on_finalize: Cell::new(false),
+            panic_on_drop: Cell::new(false),
+            cc: RefCell::new(Some(root.clone())),
+        }));
 
         register_panicking(&root);
-        register_panicking(&root.cc);
+        register_panicking(root.cc.borrow().as_ref().unwrap());
     }
     panicking_collect_cycles(assert_state_not_collecting);
 }
@@ -254,7 +263,7 @@ fn test_panicking_tracing_resurrecting() {
 
             if let Some(replaced) = RESURRECTED.with(|cell| cell.replace(None)) {
                 reset_panicking(&replaced);
-                reset_panicking(&replaced.cc);
+                reset_panicking(replaced.cc.borrow().as_ref().unwrap());
                 // replaced is dropped here
             }
             collect_cycles(); // Reclaim memory
@@ -265,7 +274,7 @@ fn test_panicking_tracing_resurrecting() {
 
     struct Resurrecter {
         panicking: Cc<Panicking>,
-        cyclic: Cc<Resurrecter>,
+        cyclic: RefCell<Option<Cc<Resurrecter>>>,
     }
 
     unsafe impl Trace for Resurrecter {
@@ -282,25 +291,28 @@ fn test_panicking_tracing_resurrecting() {
     }
 
     {
-        let a = Cc::<Resurrecter>::new_cyclic(|cc_res| Resurrecter {
-            panicking: Cc::<Panicking>::new_cyclic(|cc| Panicking {
+        let a = Cc::new(Resurrecter {
+            panicking: Cc::new(Panicking {
                 trace_counter: Cell::new(2),
                 panic_on_trace: Cell::new(true),
                 panic_on_finalize: Cell::new(false),
                 panic_on_drop: Cell::new(false),
-                cc: Cc::new(Panicking {
-                    trace_counter: Cell::new(2),
-                    panic_on_trace: Cell::new(true),
-                    panic_on_finalize: Cell::new(false),
-                    panic_on_drop: Cell::new(false),
-                    cc: cc.clone(),
-                }),
+                cc: RefCell::new(None),
             }),
-            cyclic: cc_res.clone(),
+            cyclic: RefCell::new(None),
         });
+        *a.panicking.cc.borrow_mut() = Some(Cc::new(Panicking {
+            trace_counter: Cell::new(2),
+            panic_on_trace: Cell::new(true),
+            panic_on_finalize: Cell::new(false),
+            panic_on_drop: Cell::new(false),
+            cc: RefCell::new(Some(a.panicking.clone())),
+        }));
+        *a.cyclic.borrow_mut() = Some(a.clone());
+
         register_panicking(&a);
         register_panicking(&a.panicking);
-        register_panicking(&a.panicking.cc);
+        register_panicking(a.panicking.cc.borrow().as_ref().unwrap());
         drop(a);
     }
 

@@ -1,49 +1,59 @@
 #![cfg(feature = "auto-collect")]
 
-use rust_cc::state::executions_count;
-use rust_cc::{collect_cycles, Cc, Context, Finalize, Trace};
+use std::cell::RefCell;
+
+use rust_cc::{Cc, collect_cycles, Context, Finalize, Trace};
 use rust_cc::config::config;
+use rust_cc::state::executions_count;
+
+struct Traceable {
+    inner: RefCell<Option<Cc<Traceable>>>,
+    _big: Big,
+}
+
+struct Big {
+    _array: [i64; 4096],
+}
+
+impl Default for Big {
+    fn default() -> Self {
+        Big { _array: [0; 4096] }
+    }
+}
+
+unsafe impl Trace for Traceable {
+    fn trace(&self, ctx: &mut Context<'_>) {
+        self.inner.trace(ctx);
+    }
+}
+
+impl Finalize for Traceable {}
+
+impl Traceable {
+    fn new() -> Cc<Self> {
+        let traceable = Cc::new(Traceable {
+            inner: RefCell::new(None),
+            _big: Default::default(),
+        });
+        *traceable.inner.borrow_mut() = Some(Cc::new(Traceable {
+            inner: RefCell::new(Some(traceable.clone())),
+            _big: Default::default(),
+        }));
+        traceable
+    }
+}
 
 #[test]
 fn test_auto_collect() {
-    struct Traceable {
-        inner: Option<Cc<Traceable>>,
-        _big: Big,
-    }
-
-    struct Big {
-        _array: [i64; 4096],
-    }
-
-    impl Default for Big {
-        fn default() -> Self {
-            Big { _array: [0; 4096] }
-        }
-    }
-
-    unsafe impl Trace for Traceable {
-        fn trace(&self, ctx: &mut Context<'_>) {
-            self.inner.trace(ctx);
-        }
-    }
-
-    impl Finalize for Traceable {}
-
     {
-        let _traceable = Cc::<Traceable>::new_cyclic(|cc| Traceable {
-            inner: Some(Cc::new(Traceable {
-                inner: Some(cc.clone()),
-                _big: Default::default(),
-            })),
-            _big: Default::default(),
-        });
+        let traceable = Traceable::new();
 
         let executions_counter = executions_count().unwrap();
-        drop(_traceable);
+        drop(traceable);
         assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
 
         let _ = Cc::new(Traceable {
-            inner: None,
+            inner: RefCell::new(None),
             _big: Default::default(),
         }); // Collection should be triggered by allocations
         assert_ne!(executions_counter, executions_count().unwrap(), "Didn't collected");
@@ -64,45 +74,16 @@ fn test_disable_auto_collect() {
     }
     let _drop_guard = DropGuard;
 
-    struct Traceable {
-        inner: Option<Cc<Traceable>>,
-        _big: Big,
-    }
-
-    struct Big {
-        _array: [i64; 4096],
-    }
-
-    impl Default for Big {
-        fn default() -> Self {
-            Big { _array: [0; 4096] }
-        }
-    }
-
-    unsafe impl Trace for Traceable {
-        fn trace(&self, ctx: &mut Context<'_>) {
-            self.inner.trace(ctx);
-        }
-    }
-
-    impl Finalize for Traceable {}
-
     {
         let executions_counter = executions_count().unwrap();
-        let _traceable = Cc::<Traceable>::new_cyclic(|cc| Traceable {
-            inner: Some(Cc::new(Traceable {
-                inner: Some(cc.clone()),
-                _big: Default::default(),
-            })),
-            _big: Default::default(),
-        });
+        let traceable = Traceable::new();
 
         assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
-        drop(_traceable);
+        drop(traceable);
         assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
 
         let _ = Cc::new(Traceable {
-            inner: None,
+            inner: RefCell::new(None),
             _big: Default::default(),
         }); // Collection should be triggered by allocations
         assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");

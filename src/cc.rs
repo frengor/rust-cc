@@ -3,7 +3,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ops::Deref;
-use std::ptr::{self, addr_of, drop_in_place, NonNull};
+use std::ptr::{self, drop_in_place, NonNull};
 use std::rc::Rc;
 #[cfg(feature = "nightly")]
 use std::{
@@ -51,7 +51,7 @@ impl<T: Trace + 'static> Cc<T> {
         }
     }
 
-    #[must_use = "newly created Cc is immediately dropped"]
+    /*#[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new_cyclic<F>(f: F) -> Cc<T>
     where
@@ -81,25 +81,23 @@ impl<T: Trace + 'static> Cc<T> {
 
         // Return cc, since it is now valid
         cc
-    }
+    }*/
 
     /// Takes out the value inside this [`Cc`].
     ///
     /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
     ///
     /// # Panics
-    /// This function panics if this [`Cc`] is not valid (see [`is_valid`]) or is not unique (see [`is_unique`]).
+    /// This function panics if this [`Cc`] is not unique (see [`is_unique`]).
     ///
-    /// [`is_valid`]: fn@Cc::is_valid
     /// [`is_unique`]: fn@Cc::is_unique
     #[inline]
     #[track_caller]
     pub fn into_inner(self) -> T {
-        assert!(self.is_valid(), "Cc<_> is not valid");
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            !self.counter_marker().is_traced_or_invalid(),
+            !self.counter_marker().is_traced(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
@@ -124,19 +122,16 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
     /// See [`MaybeUninit::assume_init`].
     ///
     /// # Panics
-    /// This function panics if called while tracing or this [`Cc`] isn't valid (see [`is_valid`]).
+    /// This function panics if called while tracing.
     ///
     /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
     /// [`is_unique`]: fn@Cc::is_unique
-    /// [`is_valid`]: fn@Cc::is_valid
     #[inline]
     #[track_caller]
     pub unsafe fn assume_init(self) -> Cc<T> {
         if state(|state| state.is_tracing()) {
             panic!("Cannot initialize a Cc while tracing!");
         }
-
-        assert!(self.is_valid());
 
         remove_from_list(self.inner.cast());
 
@@ -155,20 +150,17 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
     /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
     ///
     /// # Panics
-    /// This function panics if this [`Cc`] is not valid (see [`is_valid`]), is not unique (see [`is_unique`]) or if it's called while tracing.
+    /// This function panics if this [`Cc`] is not unique (see [`is_unique`]) or if it's called while tracing.
     ///
     /// [`Cc<T>`]: struct@Cc
     /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
     /// [`is_unique`]: fn@Cc::is_unique
-    /// [`is_valid`]: fn@Cc::is_valid
     #[inline]
     #[track_caller]
     pub fn init(mut self, value: T) -> Cc<T> {
         if state(|state| state.is_tracing()) {
             panic!("Cannot initialize a Cc while tracing!");
         }
-
-        assert!(self.is_valid());
 
         // This prevents race conditions
         assert!(self.is_unique(), "Cc is not unique");
@@ -206,11 +198,6 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.strong_count() == 1
     }
 
-    #[inline]
-    pub fn is_valid(&self) -> bool {
-        self.counter_marker().is_valid()
-    }
-
     #[cfg(feature = "finalization")]
     #[inline]
     #[track_caller]
@@ -228,16 +215,11 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
     #[inline(always)]
     fn counter_marker(&self) -> &CounterMarker {
-        // SAFETY: It's always safe to access the counter_marker if we're not dereferencing anything else
-        unsafe {
-            &*addr_of!((*self.inner.as_ptr()).counter_marker)
-        }
+        &self.inner().counter_marker
     }
 
-    /// Note: don't call if CcOnHeap is not valid!
     #[inline(always)]
     fn inner(&self) -> &CcOnHeap<T> {
-        // SAFETY: since Cc is alive and the underlying CcOnHeap is valid then we can access it
         unsafe { self.inner.as_ref() }
     }
 }
@@ -276,36 +258,31 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
             panic!("Cannot deref while tracing!");
         }
 
-        // Make sure we don't access an invalid Cc
-        assert!(self.is_valid(), "This Cc is not valid!");
+        //remove_from_list(self.inner.cast());
 
-        remove_from_list(self.inner.cast());
-        // We can do this since self is valid
         self.inner().get_elem()
     }
 }
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
-        let counter_marker = self.counter_marker();
-
         // Always decrement the counter
-        let res = counter_marker.decrement_counter();
+        let res = self.counter_marker().decrement_counter();
         debug_assert!(res.is_ok());
 
         // A CcOnHeap can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
-        // In this case, or when invalid, no further action has to be taken, since the counter has been already decremented.
-        if counter_marker.is_traced_or_invalid() {
+        // In this case, no further action has to be taken, since the counter has been already decremented.
+        if self.counter_marker().is_traced() {
             return;
         }
 
-        if counter_marker.counter() == 0 {
+        if self.counter_marker().counter() == 0 {
             // Only us have a pointer to this allocation, deallocate!
 
             remove_from_list(self.inner.cast());
 
             state(|state| {
-                let to_drop = if cfg!(feature = "finalization") && counter_marker.needs_finalization() {
+                let to_drop = if cfg!(feature = "finalization") && self.counter_marker().needs_finalization() {
                     // This cfg is necessary since the cfg! above still compiles the line below,
                     // however state doesn't contain the finalizing field when the finalization feature is off,
                     // so removing this cfg makes the crate to fail compilation
@@ -313,10 +290,10 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
                     // Set finalized
-                    counter_marker.set_finalized(true);
+                    self.counter_marker().set_finalized(true);
 
                     self.inner().get_elem().finalize();
-                    counter_marker.counter() == 0
+                    self.counter_marker().counter() == 0
                     // _finalizing_guard is dropped here, resetting state.finalizing
                 } else {
                     true
@@ -335,7 +312,6 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 }
             });
         } else {
-            // SAFETY: we checked that inner is valid
             // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
             unsafe { add_to_list(self.inner.cast()) };
         }
@@ -346,10 +322,6 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        // This must be done, since it is possible to call this function on an invalid instance
-        assert!(self.is_valid());
-
-        // SAFETY: we have just checked that self is valid
         unsafe {
             if CcOnHeap::trace(self.inner.cast(), ctx) {
                 self.inner().get_elem().trace(ctx);
@@ -410,47 +382,11 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
         CcOnHeap::new(t)
     }
-
-    #[inline]
-    #[must_use]
-    fn new_invalid() -> NonNull<CcOnHeap<MaybeUninit<T>>> {
-        let layout = Layout::new::<CcOnHeap<MaybeUninit<T>>>();
-        unsafe {
-            let ptr: NonNull<CcOnHeap<MaybeUninit<T>>> = cc_alloc(layout);
-            ptr::write(
-                ptr.as_ptr(),
-                CcOnHeap {
-                    next: UnsafeCell::new(None),
-                    prev: UnsafeCell::new(None),
-                    #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace),
-                    #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(
-                        ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace
-                    ),
-                    counter_marker: {
-                        let cm = CounterMarker::new_with_counter_to_one();
-                        cm.mark(Mark::Invalid);
-                        cm
-                    },
-                    _phantom: PhantomData,
-                    elem: UnsafeCell::new(MaybeUninit::uninit()),
-                },
-            );
-            ptr
-        }
-    }
 }
 
 impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     #[inline]
-    pub(crate) fn is_valid(&self) -> bool {
-        self.counter_marker().is_valid()
-    }
-
-    #[inline]
     pub(crate) fn get_elem(&self) -> &T {
-        debug_assert!(self.is_valid());
         unsafe { &*self.elem.get() }
     }
 
@@ -486,10 +422,6 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
 unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
-        // This should never be called on an invalid instance.
-        // The debug_assert should catch any bug related to this
-        debug_assert!(self.is_valid());
-
         self.get_elem().trace(ctx);
     }
 }
@@ -497,10 +429,6 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
 impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
     #[inline(always)]
     fn finalize(&self) {
-        // This should never be called on an invalid instance.
-        // The debug_assert should catch any bug related to this
-        debug_assert!(self.is_valid());
-
         self.get_elem().finalize();
     }
 }
@@ -543,9 +471,6 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 #[inline]
 pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
     let counter_marker = ptr.as_ref().counter_marker();
-
-    // Check if ptr can be added safely
-    debug_assert!(counter_marker.is_valid());
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
         let mut list = pc.borrow_mut();
@@ -608,8 +533,6 @@ impl CcOnHeap<()> {
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     #[inline]
     unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
-        debug_assert!(ptr.as_ref().is_valid()); // Just to be sure
-
         #[cfg(feature = "nightly")]
         {
             let vtable = ptr.as_ref().vtable;
@@ -624,8 +547,6 @@ impl CcOnHeap<()> {
 
     /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
     pub(super) unsafe fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        debug_assert!(ptr.as_ref().is_valid());
-
         let counter_marker = ptr.as_ref().counter_marker();
         match ctx.inner() {
             ContextInner::Counting { root_list, .. } => {
@@ -667,8 +588,6 @@ impl CcOnHeap<()> {
     #[inline(never)] // Don't inline this function, it's huge
     #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
     unsafe fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
-        debug_assert!(ptr.as_ref().is_valid());
-
         #[inline(always)]
         fn non_root(counter_marker: &CounterMarker) -> bool {
             counter_marker.tracing_counter() == counter_marker.counter()

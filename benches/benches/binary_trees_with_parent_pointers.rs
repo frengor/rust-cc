@@ -1,5 +1,6 @@
 //! Benchmark adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
+use std::cell::RefCell;
 use std::hint::black_box;
 
 use rust_cc::*;
@@ -32,7 +33,7 @@ enum TreeNodeWithParent {
         right: Cc<TreeNodeWithParent>,
     },
     Nested {
-        parent: Cc<TreeNodeWithParent>,
+        parent: RefCell<Option<Cc<TreeNodeWithParent>>>,
         left: Cc<TreeNodeWithParent>,
         right: Cc<TreeNodeWithParent>,
     },
@@ -64,22 +65,46 @@ impl TreeNodeWithParent {
             return Cc::new(Self::End);
         }
 
-        Cc::<Self>::new_cyclic(|cc| Self::Root {
-            left: Self::new_nested(depth - 1, cc.clone()),
-            right: Self::new_nested(depth - 1, cc.clone()),
-        })
+        let root = Cc::new(Self::Root {
+            left: Self::new_nested(depth - 1),
+            right: Self::new_nested(depth - 1),
+        });
+
+        if let Self::Root{ left, right } = &*root {
+            if let Self::Nested { parent, ..} = &**left {
+                *parent.borrow_mut() = Some(root.clone());
+            }
+
+            if let Self::Nested { parent, ..} = &**right {
+                *parent.borrow_mut() = Some(root.clone());
+            }
+        }
+
+        root
     }
 
-    fn new_nested(depth: usize, parent: Cc<Self>) -> Cc<Self> {
+    fn new_nested(depth: usize) -> Cc<Self> {
         if depth == 0 {
             return Cc::new(Self::End);
         }
 
-        Cc::<Self>::new_cyclic(|cc| Self::Nested {
-            left: Self::new_nested(depth - 1, cc.clone()),
-            right: Self::new_nested(depth - 1, cc.clone()),
-            parent,
-        })
+        let cc = Cc::new(Self::Nested {
+            left: Self::new_nested(depth - 1),
+            right: Self::new_nested(depth - 1),
+            parent: RefCell::new(None),
+        });
+
+        if let Self::Nested{ left, right, .. } = &*cc {
+            if let Self::Nested { parent, ..} = &**left {
+                *parent.borrow_mut() = Some(cc.clone());
+            }
+
+            if let Self::Nested { parent, ..} = &**right {
+                *parent.borrow_mut() = Some(cc.clone());
+            }
+        }
+
+        cc
     }
 
     fn check(&self) -> usize {

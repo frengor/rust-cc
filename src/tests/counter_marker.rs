@@ -1,19 +1,11 @@
 use crate::counter_marker::*;
 
-// This const is used only in a part of test_increment_decrement() which is
-// disabled under MIRI (since it is very slow and doesn't really use unsafe).
-// Thus, the cfg attribute removes the constant when running under MIRI to
-// disable the "unused const" warning
-#[cfg(not(miri))]
-const MAX: u32 = 0b11111111111111; // 14 ones
-
 #[test]
 fn test_new() {
     fn test(counter: CounterMarker) {
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         assert_eq!(counter.counter(), 1);
         assert_eq!(counter.tracing_counter(), 1);
@@ -44,7 +36,6 @@ fn test_increment_decrement() {
             assert!(counter.is_not_marked());
             assert!(!counter.is_in_possible_cycles());
             assert!(!counter.is_traced());
-            assert!(counter.is_valid());
         }
 
         assert_not_marked(&counter);
@@ -121,42 +112,30 @@ fn test_marks() {
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
 
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::PossibleCycles);
 
         assert!(counter.is_not_marked());
         assert!(counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::Traced);
 
         assert!(!counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
 
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
-
-        counter.mark(Mark::Invalid);
-
-        assert!(!counter.is_not_marked());
-        assert!(!counter.is_in_possible_cycles());
-        assert!(!counter.is_traced());
-        assert!(!counter.is_valid());
     }
 
     test(CounterMarker::new_with_counter_to_one());
