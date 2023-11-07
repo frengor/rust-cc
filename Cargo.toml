@@ -34,7 +34,7 @@ pedantic-debug-assertions = []
 thiserror = "1.0.37"
 
 [dev-dependencies]
-iai = "0.1.1"
+iai-callgrind = "0.7.3"
 rand = "0.8.3"
 
 [[bench]]
