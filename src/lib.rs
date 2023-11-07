@@ -39,9 +39,7 @@ pub fn collect_cycles() {
             return;
         }
 
-        let _ = POSSIBLE_CYCLES.try_with(|pc| {
-            collect(state, pc);
-        });
+        collect(state);
 
         #[cfg(feature = "auto-collect")]
         adjust_trigger_point(state);
@@ -53,10 +51,7 @@ pub fn collect_cycles() {
 pub(crate) fn trigger_collection() {
     let _ = try_state(|state| {
         if !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false) {
-            let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                collect(state, pc);
-            });
-
+            collect(state);
             adjust_trigger_point(state);
         }
     });
@@ -67,7 +62,7 @@ fn adjust_trigger_point(state: &State) {
     let _ = config::config(|config| config.adjust(state));
 }
 
-fn collect(state: &State, possible_cycles: &RefCell<List>) {
+fn collect(state: &State) {
     state.set_collecting(true);
     state.increment_executions_count();
 
@@ -85,23 +80,23 @@ fn collect(state: &State, possible_cycles: &RefCell<List>) {
     let _drop_guard = DropGuard { state };
 
     #[cfg(feature = "finalization")]
-    while !is_empty(possible_cycles) {
-        __collect(state, possible_cycles);
+    while let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+        __collect(state);
     }
     #[cfg(not(feature = "finalization"))]
-    if !is_empty(possible_cycles) {
-        __collect(state, possible_cycles);
+    if let Ok(false) = POSSIBLE_CYCLES.try_with(|pc| pc.borrow().is_empty()) {
+        __collect(state);
     }
 
     // _drop_guard is dropped here, setting state.collecting to false
 }
 
-fn __collect(state: &State, possible_cycles: &RefCell<List>) {
+fn __collect(state: &State) {
     let mut non_root_list = List::new();
     {
         let mut root_list = List::new();
 
-        while let Some(ptr) = get_and_remove_first(possible_cycles) {
+        while let Some(ptr) = POSSIBLE_CYCLES.with(|pc| pc.borrow_mut().remove_first()) {
             // remove_first already marks ptr as NonMarked
             trace_counting(ptr, &mut root_list, &mut non_root_list);
         }
@@ -160,16 +155,6 @@ fn __collect(state: &State, possible_cycles: &RefCell<List>) {
             deallocate_list(non_root_list, state);
         }
     }
-}
-
-#[inline]
-fn is_empty(list: &RefCell<List>) -> bool {
-    list.borrow().is_empty()
-}
-
-#[inline]
-fn get_and_remove_first(list: &RefCell<List>) -> Option<NonNull<CcOnHeap<()>>> {
-    list.borrow_mut().remove_first()
 }
 
 #[inline]
