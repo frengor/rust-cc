@@ -5,7 +5,6 @@ use crate::utils;
 const NON_MARKED: u32 = 0u32;
 const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 3);
 const TRACED: u32 = 2u32 << (u32::BITS - 3);
-const INVALID: u32 = 0b111u32 << (u32::BITS - 3);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
 const TRACING_COUNTER_MASK: u32 = COUNTER_MASK << 14; // 14 bits set to 1 followed by 14 bits set to 0
@@ -15,7 +14,8 @@ const FIRST_TWO_BITS_MASK: u32 = 3u32 << (u32::BITS - 2);
 
 const INITIAL_VALUE: u32 = COUNTER_MASK + 2; // +2 means that tracing counter and counter are both set to 1
 
-const MAX: u32 = COUNTER_MASK;
+// pub(crate) to make it available in tests
+pub(crate) const MAX: u32 = COUNTER_MASK;
 
 /// Internal representation:
 /// ```text
@@ -28,7 +28,6 @@ const MAX: u32 = COUNTER_MASK;
 ///   * `NON_MARKED`
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
 ///   * `TRACED`
-///   * `INVALID` (`CcOnHeap` is invalid)
 /// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
 /// * `D` is the counter (last one for sum/subtraction efficiency)
@@ -136,22 +135,9 @@ impl CounterMarker {
         (self.counter.get() & FIRST_TWO_BITS_MASK) == 0u32
     }
 
-    /// Returns whether this CounterMarker is traced or not valid (exclusive or).
-    #[inline]
-    pub(crate) fn is_traced_or_invalid(&self) -> bool {
-        // true if (self.counter & BITS_MASK) is equal to 010, 011, 100, 101 or 111,
-        // so if the first two bits aren't both 0
-        (self.counter.get() & FIRST_TWO_BITS_MASK) != 0u32
-    }
-
     #[inline]
     pub(crate) fn is_traced(&self) -> bool {
         (self.counter.get() & BITS_MASK) == TRACED
-    }
-
-    #[inline]
-    pub(crate) fn is_valid(&self) -> bool {
-        (self.counter.get() & BITS_MASK) != INVALID
     }
 
     #[inline]
@@ -166,5 +152,4 @@ pub(crate) enum Mark {
     NonMarked = NON_MARKED,
     PossibleCycles = IN_POSSIBLE_CYCLES,
     Traced = TRACED,
-    Invalid = INVALID,
 }

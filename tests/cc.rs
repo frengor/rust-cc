@@ -15,7 +15,7 @@ fn test_complex() {
 
     struct C {
         a: RefCell<Option<Cc<A>>>,
-        b: Cc<B>,
+        b: RefCell<Option<Cc<B>>>,
     }
 
     struct D {
@@ -57,14 +57,16 @@ fn test_complex() {
 
     impl Finalize for C {}
 
-    let a = Cc::<A>::new_cyclic(|a| A {
-        b: Cc::<B>::new_cyclic(|b| B {
+    let a = Cc::new(A {
+        b: Cc::new(B {
             c: Cc::new(C {
-                a: RefCell::new(Some(a.clone())),
-                b: b.clone(),
+                a: RefCell::new(None),
+                b: RefCell::new(None),
             }),
         }),
     });
+    *a.b.c.a.borrow_mut() = Some(a.clone());
+    *a.b.c.b.borrow_mut() = Some(a.b.clone());
     let d = Cc::new(D { c: a.b.c.clone() });
     drop(a);
     collect_cycles();
@@ -75,7 +77,7 @@ fn test_complex() {
     collect_cycles();
 }
 
-#[test]
+/*#[test]
 fn useless_cyclic() {
     let _cc = Cc::<u32>::new_cyclic(|_| {
         collect_cycles();
@@ -88,7 +90,7 @@ fn useless_cyclic() {
     collect_cycles();
     drop(_cc);
     collect_cycles();
-}
+}*/
 
 #[cfg(feature = "finalization")]
 #[test]
@@ -175,14 +177,15 @@ fn test_finalization() {
             a: RefCell::new(None),
         });
 
-        let a = Cc::<A>::new_cyclic(|a| A {
+        let a = Cc::new(A {
             dropped: Cell::new(false),
             c: Rc::downgrade(&c1),
-            b: RefCell::new(Some(Cc::new(B {
-                dropped: Cell::new(false),
-                a: a.clone(),
-            }))),
+            b: RefCell::new(None),
         });
+        *a.b.borrow_mut() = Some(Cc::new(B {
+            dropped: Cell::new(false),
+            a: a.clone(),
+        }));
 
         assert_eq!(a.strong_count(), 2);
 
@@ -318,7 +321,7 @@ fn test_finalize_drop() {
         _a: RefCell::new(Some(A {
             dropped: Cell::new(false),
             _c: weak.clone(),
-            b: RefCell::new(Some(Cc::new_cyclic(|_| B {
+            b: RefCell::new(Some(Cc::new(B {
                 dropped: Cell::new(false),
                 a: Cc::new(A {
                     dropped: Cell::new(false),
@@ -348,7 +351,7 @@ fn test_finalize_drop() {
 #[test]
 fn finalization_test() {
     struct Circular {
-        next: RefCell<Cc<Circular>>,
+        next: RefCell<Option<Cc<Circular>>>,
         does_finalization: Cell<bool>,
     }
 
@@ -361,23 +364,24 @@ fn finalization_test() {
     impl Finalize for Circular {
         fn finalize(&self) {
             if self.does_finalization.get() {
-                *self.next.borrow_mut() = Cc::new(Circular {
+                *self.next.borrow_mut() = Some(Cc::new(Circular {
                     next: self.next.clone(),
                     does_finalization: Cell::new(false),
-                });
+                }));
                 self.does_finalization.set(false);
             }
         }
     }
 
     {
-        let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-            next: RefCell::new(Cc::new(Circular {
-                next: RefCell::new(cc.clone()),
+        let cc = Cc::new(Circular {
+            next: RefCell::new(Some(Cc::new(Circular {
+                next: RefCell::new(None),
                 does_finalization: Cell::new(false),
-            })),
+            }))),
             does_finalization: Cell::new(true),
         });
+        *cc.next.borrow().as_ref().unwrap().next.borrow_mut() = Some(cc.clone());
     }
     collect_cycles();
 }
@@ -404,9 +408,10 @@ fn rc_test() {
 #[test]
 fn box_test() {
     {
-        let _cc = Cc::<Box<dyn Trace>>::new_cyclic(|cc| {
-            Box::new(Cc::new(cc.clone())) as Box<dyn Trace>
-        });
+        let cc = Cc::new(RefCell::new(None));
+        {
+            *cc.borrow_mut() = Some(Box::new(cc.clone()) as Box<dyn Trace>);
+        }
     }
 
     collect_cycles();
@@ -419,7 +424,7 @@ fn alignment_test() {
             $({
                 #[repr(align($i))]
                 struct A {
-                    cc: Cc<A>,
+                    cc: RefCell<Option<Cc<A>>>,
                 }
 
                 unsafe impl Trace for A {
@@ -431,9 +436,10 @@ fn alignment_test() {
                 impl Finalize for A {}
 
                 fn use_struct() {
-                    let _ = Cc::<A>::new_cyclic(|cc| A {
-                        cc: cc.clone(),
+                    let cc = Cc::new(A {
+                        cc: RefCell::new(None),
                     });
+                    *cc.cc.borrow_mut() = Some(cc.clone());
                 }
                 use_struct();
             })+

@@ -21,9 +21,6 @@ impl List {
 
     #[inline]
     pub(crate) fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
-        // Check if ptr can be added safely
-        unsafe { debug_assert!(ptr.as_ref().is_valid()) };
-
         if let Some(first) = &mut self.first {
             unsafe {
                 *first.as_ref().get_prev() = Some(ptr);
@@ -43,10 +40,6 @@ impl List {
 
     #[inline]
     pub(crate) fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
-        // Make sure ptr is valid. Since a pointer to an invalid CcOnHeap<_> cannot
-        // be added to any list, if ptr is invalid then this fn shouldn't have been called
-        unsafe { debug_assert!(ptr.as_ref().is_valid()) };
-
         // Remove from possible_cycles list
         unsafe {
             match (*ptr.as_ref().get_next(), *ptr.as_ref().get_prev()) {
