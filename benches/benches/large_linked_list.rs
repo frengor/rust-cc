@@ -1,9 +1,8 @@
 use std::cell::RefCell;
-use std::hint::black_box;
 
 use rust_cc::*;
 
-fn large_linked_list(size: usize) -> Vec<usize> {
+pub fn large_linked_list(size: usize) -> Vec<usize> {
     let mut res = Vec::new();
     for _ in 0..30 {
         let mut list = List::new();
@@ -72,7 +71,3 @@ unsafe impl Trace for Node {
 }
 
 impl Finalize for Node {}
-
-pub fn benchmark_large_linked_list() {
-    large_linked_list(black_box(4096));
-}

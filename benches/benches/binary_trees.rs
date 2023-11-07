@@ -1,12 +1,10 @@
 //! Benchmark adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
-use std::hint::black_box;
-
 use rust_cc::*;
 
 // BENCHMARK 2: It's binary-trees from the benchmarks game!
 
-fn count_binary_trees(max_size: usize) -> Vec<usize> {
+pub fn count_binary_trees(max_size: usize) -> Vec<usize> {
     let mut res = Vec::new();
     {
         let min_size = 4;
@@ -63,8 +61,4 @@ impl TreeNode {
             Self::Nested { left, right } => left.check() + right.check() + 1,
         }
     }
-}
-
-pub fn benchmark_count_binary_trees() {
-    count_binary_trees(black_box(11));
 }

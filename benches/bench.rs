@@ -1,4 +1,4 @@
-///! Same benchmarks of [rust-cc-benchmarks](https://github.com/frengor/rust-cc-benchmarks), but run with [iai](https://github.com/bheisler/iai).
+//! Same benchmarks of [rust-cc-benchmarks](https://github.com/frengor/rust-cc-benchmarks), but run with [iai-callgrind](https://github.com/iai-callgrind/iai-callgrind).
 
 mod benches {
     pub(super) mod stress_test;
@@ -7,9 +7,50 @@ mod benches {
     pub(super) mod large_linked_list;
 }
 
-use benches::stress_test::benchmark_stress_test;
-use benches::binary_trees::benchmark_count_binary_trees;
-use benches::binary_trees_with_parent_pointers::benchmark_count_binary_trees_with_parent;
-use benches::large_linked_list::benchmark_large_linked_list;
+use std::hint::black_box;
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use crate::benches::binary_trees::count_binary_trees;
+use crate::benches::binary_trees_with_parent_pointers::count_binary_trees_with_parent;
+use crate::benches::large_linked_list::large_linked_list;
+use crate::benches::stress_test::stress_test;
 
-iai::main!(benchmark_stress_test, benchmark_count_binary_trees, benchmark_count_binary_trees_with_parent, benchmark_large_linked_list);
+#[library_benchmark]
+#[bench::seed(0xCAFE)]
+fn stress_test_bench(seed: u64) -> Vec<usize> {
+    black_box(stress_test(seed))
+}
+
+#[library_benchmark]
+#[bench::depth(11)]
+fn count_binary_trees_bench(depth: usize) -> Vec<usize> {
+    black_box(count_binary_trees(depth))
+}
+
+#[library_benchmark]
+#[bench::depth(11)]
+fn count_binary_trees_with_parent_bench(depth: usize) -> Vec<usize> {
+    black_box(count_binary_trees_with_parent(depth))
+}
+
+#[library_benchmark]
+#[bench::size(4096)]
+fn large_linked_list_bench(size: usize) -> Vec<usize> {
+    black_box(large_linked_list(size))
+}
+
+library_benchmark_group!(
+    name = stress_tests_group;
+    benchmarks = stress_test_bench
+);
+
+library_benchmark_group!(
+    name = binary_trees_group;
+    benchmarks = count_binary_trees_bench, count_binary_trees_with_parent_bench
+);
+
+library_benchmark_group!(
+    name = linked_lists_group;
+    benchmarks = large_linked_list_bench
+);
+
+main!(library_benchmark_groups = stress_tests_group, binary_trees_group, linked_lists_group);
