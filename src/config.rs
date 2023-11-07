@@ -19,6 +19,7 @@ where
     CONFIG.try_with(|config| Ok(f(config.try_borrow_mut()?.deref_mut())))?
 }
 
+#[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum ConfigAccessError {
     #[error(transparent)]
