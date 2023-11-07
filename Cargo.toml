@@ -34,7 +34,7 @@ rust-cc-derive = { path = "./derive", version = "0.2.0", optional = true }
 thiserror = "1.0.37"
 
 [dev-dependencies]
-iai-callgrind = "0.7.3"
+iai-callgrind = "0.7.3" # Also update IAI_CALLGRIND_VERSION in .github/workflows/bench.yml
 rand = "0.8.3"
 
 [[bench]]
