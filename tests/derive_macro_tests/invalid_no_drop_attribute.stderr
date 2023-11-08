@@ -1,0 +1,17 @@
+error: Invalid attribute position
+ --> tests/derive_macro_tests/invalid_no_drop_attribute.rs:5:15
+  |
+5 |     #[rust_cc(unsafe_no_drop)]
+  |               ^^^^^^^^^^^^^^
+
+error: Invalid attribute position
+  --> tests/derive_macro_tests/invalid_no_drop_attribute.rs:11:15
+   |
+11 |     #[rust_cc(unsafe_no_drop)]
+   |               ^^^^^^^^^^^^^^
+
+error: Invalid attribute position
+  --> tests/derive_macro_tests/invalid_no_drop_attribute.rs:18:19
+   |
+18 |         #[rust_cc(unsafe_no_drop)]
+   |                   ^^^^^^^^^^^^^^
