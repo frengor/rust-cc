@@ -42,6 +42,7 @@ impl List {
     }
 }
 
+#[derive(Trace, Finalize)]
 enum Node {
     Cons { next: Cc<Node>, previous: RefCell<Option<Cc<Node>>> },
     Nil,
@@ -57,17 +58,3 @@ impl Node {
         }
     }
 }
-
-unsafe impl Trace for Node {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        match self {
-            Self::Cons { next, previous } => {
-                next.trace(ctx);
-                previous.trace(ctx);
-            },
-            Self::Nil => {},
-        }
-    }
-}
-
-impl Finalize for Node {}

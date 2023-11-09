@@ -9,18 +9,11 @@ use rust_cc::*;
 
 // BENCHMARK 1: My janky stress test
 // (It basically creates a graph where every node is rooted, then de-roots some nodes a few at a time)
+#[derive(Trace, Finalize)]
 struct DirectedGraphNode {
     _label: String,
     edges: Vec<Cc<RefCell<DirectedGraphNode>>>,
 }
-
-unsafe impl Trace for DirectedGraphNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.edges.iter().for_each(|elem| elem.trace(ctx));
-    }
-}
-
-impl Finalize for DirectedGraphNode {}
 
 const NODE_COUNT: usize = 1 << 15;
 const EDGE_COUNT: usize = 1 << 15;
