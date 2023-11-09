@@ -1,14 +1,20 @@
 use rust_cc::*;
 
-#[derive(Trace, Finalize)] // Finalize is required by Trace
+#[derive(Trace)]
 struct MyStruct {
     a: (),
 }
 
-#[derive(Trace, Finalize)] // Finalize is required by Trace
+impl Finalize for MyStruct {
+}
+
+#[derive(Trace)]
 enum MyEnum {
     A(),
     B(),
+}
+
+impl Finalize for MyEnum {
 }
 
 fn main() {
