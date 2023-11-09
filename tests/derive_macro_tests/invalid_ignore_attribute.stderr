@@ -1,0 +1,11 @@
+error: Invalid attribute position
+ --> tests/derive_macro_tests/invalid_ignore_attribute.rs:4:11
+  |
+4 | #[rust_cc(ignore)]
+  |           ^^^^^^
+
+error: Invalid attribute position
+ --> tests/derive_macro_tests/invalid_ignore_attribute.rs:9:11
+  |
+9 | #[rust_cc(ignore)]
+  |           ^^^^^^

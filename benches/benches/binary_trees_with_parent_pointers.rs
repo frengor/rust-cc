@@ -26,6 +26,7 @@ pub fn count_binary_trees_with_parent(max_size: usize) -> Vec<usize> {
     res
 }
 
+#[derive(Trace, Finalize)]
 enum TreeNodeWithParent {
     Root {
         left: Cc<TreeNodeWithParent>,
@@ -38,25 +39,6 @@ enum TreeNodeWithParent {
     },
     End,
 }
-
-unsafe impl Trace for TreeNodeWithParent {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        match self {
-            Self::Root { left, right } => {
-                left.trace(ctx);
-                right.trace(ctx);
-            }
-            Self::Nested { parent, left, right } => {
-                parent.trace(ctx);
-                left.trace(ctx);
-                right.trace(ctx);
-            }
-            Self::End => {},
-        }
-    }
-}
-
-impl Finalize for TreeNodeWithParent {}
 
 impl TreeNodeWithParent {
     fn new(depth: usize) -> Cc<Self> {
