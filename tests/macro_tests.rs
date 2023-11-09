@@ -13,4 +13,5 @@ fn macro_tests() {
     t.compile_fail("tests/derive_macro_tests/invalid_attributes.rs");
     t.compile_fail("tests/derive_macro_tests/invalid_ignore_attribute.rs");
     t.compile_fail("tests/derive_macro_tests/invalid_no_drop_attribute.rs");
+    t.compile_fail("tests/derive_macro_tests/invalid_drop_impl.rs");
 }

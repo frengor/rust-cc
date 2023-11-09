@@ -1,0 +1,21 @@
+error[E0119]: conflicting implementations of trait `Drop` for type `MyStruct`
+  --> tests/derive_macro_tests/invalid_drop_impl.rs:3:10
+   |
+3  | #[derive(Trace)]
+   |          ^^^^^ conflicting implementation for `MyStruct`
+...
+11 | impl Drop for MyStruct {
+   | ---------------------- first implementation here
+   |
+   = note: this error originates in the derive macro `Trace` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `Drop` for type `MyEnum`
+  --> tests/derive_macro_tests/invalid_drop_impl.rs:16:10
+   |
+16 | #[derive(Trace)]
+   |          ^^^^^ conflicting implementation for `MyEnum`
+...
+25 | impl Drop for MyEnum {
+   | -------------------- first implementation here
+   |
+   = note: this error originates in the derive macro `Trace` (in Nightly builds, run with -Z macro-backtrace for more info)
