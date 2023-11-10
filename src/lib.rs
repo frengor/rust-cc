@@ -144,17 +144,16 @@ fn __collect(state: &State, possible_cycles: &RefCell<List>) {
                 // next iteration of the loop, which will automatically check for resurrected objects
                 // using the same algorithm of the initial tracing. This makes it more difficult to
                 // create memory leaks accidentally using finalizers than in the previous implementation.
-                let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                    let mut pc = pc.borrow_mut();
+                let mut pc = possible_cycles.borrow_mut();
 
-                    // pc is already marked PossibleCycles, while non_root_list is not.
-                    // non_root_list have to be added to pc after having been marked.
-                    // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
-                    // append the other to it in O(1), since we already know the last element of pc from the marking.
-                    // This avoids iterating unnecessarily both lists and the need to update many pointers.
-                    mem::swap(&mut *pc, &mut non_root_list);
-                    pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
-                });
+                // pc is already marked PossibleCycles, while non_root_list is not.
+                // non_root_list have to be added to pc after having been marked.
+                // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
+                // append the other to it in O(1), since we already know the last element of pc from the marking.
+                // This avoids iterating unnecessarily both lists and the need to update many pointers.
+                mem::swap(&mut *pc, &mut non_root_list);
+                pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
+                drop(pc); // Useless, but better be explicit here in case more code is added below this line
             }
         }
 
