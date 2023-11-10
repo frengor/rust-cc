@@ -9,7 +9,7 @@ use crate::state::State;
 const DEFAULT_BYTES_THRESHOLD: usize = 100;
 
 thread_local! {
-    pub(crate) static CONFIG: RefCell<Config> = RefCell::new(Config::default());
+    pub(crate) static CONFIG: RefCell<Config> = const { RefCell::new(Config::new()) };
 }
 
 pub fn config<F, R>(f: F) -> Result<R, ConfigAccessError>
@@ -37,17 +37,16 @@ pub struct Config {
     auto_collect: bool,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
+impl Config {
+    #[inline]
+    const fn new() -> Self {
+        Self {
             bytes_threshold: DEFAULT_BYTES_THRESHOLD,
             adjustment_percent: 0.25,
             auto_collect: true,
         }
     }
-}
 
-impl Config {
     #[inline]
     pub fn auto_collect(&self) -> bool {
         self.auto_collect
@@ -107,5 +106,12 @@ impl Config {
             }
         }
         self.bytes_threshold = bytes_threshold;
+    }
+}
+
+impl Default for Config {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }

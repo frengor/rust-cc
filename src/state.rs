@@ -4,7 +4,7 @@ use std::thread::AccessError;
 use thiserror::Error;
 
 thread_local! {
-    static STATE: State = State::default();
+    static STATE: State = const { State::new() };
 }
 
 #[inline]
@@ -39,7 +39,6 @@ pub(crate) fn reset_state() {
     });
 }
 
-#[derive(Default)]
 pub(crate) struct State {
     collecting: Cell<bool>,
 
@@ -52,6 +51,20 @@ pub(crate) struct State {
 }
 
 impl State {
+    #[inline]
+    const fn new() -> Self {
+        Self {
+            collecting: Cell::new(false),
+
+            #[cfg(feature = "finalization")]
+            finalizing: Cell::new(false),
+
+            dropping: Cell::new(false),
+            allocated_bytes: Cell::new(0),
+            executions_counter: Cell::new(0),
+        }
+    }
+
     #[inline]
     pub(crate) fn allocated_bytes(&self) -> usize {
         self.allocated_bytes.get()
@@ -120,6 +133,13 @@ impl State {
         {
             self.collecting.get() && !self.dropping.get()
         }
+    }
+}
+
+impl Default for State {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 
