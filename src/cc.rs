@@ -220,6 +220,11 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         !self.counter_marker().needs_finalization()
     }
 
+    #[inline]
+    pub fn mark_alive(&self) {
+        remove_from_list(self.inner.cast());
+    }
+
     #[inline(always)]
     fn counter_marker(&self) -> &CounterMarker {
         &self.inner().counter_marker
