@@ -351,7 +351,7 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     counter_marker: CounterMarker,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
 
-    // This UnsafeCell is necessary, since we want to execute Drop::drop
+    // This UnsafeCell is necessary, since we want to execute Drop::drop (which takes an &mut)
     // for elem but still have access to the other fields of CcOnHeap
     elem: UnsafeCell<T>,
 }
