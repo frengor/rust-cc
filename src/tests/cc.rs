@@ -371,3 +371,54 @@ fn test_init() {
     let cc = cc.init(42);
     assert_eq!(*cc, 42);
 }
+
+#[test]
+fn no_cyclic_finalization_ends() {
+    struct ToFinalize;
+
+    unsafe impl Trace for ToFinalize {
+        fn trace(&self, _: &mut Context<'_>) {
+            panic!("Trace shouldn't have been called on ToFinalize.");
+        }
+    }
+
+    impl Finalize for ToFinalize {
+        fn finalize(&self) {
+            let _ = Cc::new(ToFinalize);
+        }
+    }
+
+    let _ = Cc::new(ToFinalize);
+}
+
+#[test]
+fn cyclic_finalization_ends() {
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
+    }
+
+    impl Cyclic {
+        fn new() -> Cc<Cyclic> {
+            let cc = Cc::new(Cyclic {
+                cyclic: RefCell::new(None),
+            });
+            *cc.cyclic.borrow_mut() = Some(cc.clone());
+            cc
+        }
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            let _ = Cyclic::new();
+        }
+    }
+
+    let _ = Cyclic::new();
+    collect_cycles();
+}

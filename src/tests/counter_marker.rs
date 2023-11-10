@@ -11,20 +11,31 @@ fn test_new() {
         assert_eq!(counter.tracing_counter(), 1);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
 #[test]
 fn test_is_to_finalize() {
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
     assert!(counter.needs_finalization());
 
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
     counter.set_finalized(true);
     assert!(!counter.needs_finalization());
 
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    counter.set_finalized(false);
+    assert!(counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    assert!(!counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_finalized(true);
+    assert!(!counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
     counter.set_finalized(false);
     assert!(counter.needs_finalization());
 }
@@ -102,8 +113,8 @@ fn test_increment_decrement() {
         assert_not_marked(&counter);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
 #[test]
@@ -138,8 +149,8 @@ fn test_marks() {
         assert!(!counter.is_traced());
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
 #[test]
@@ -157,6 +168,6 @@ fn test_reset_tracing_counter() {
         assert_eq!(counter.tracing_counter(), 0);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }

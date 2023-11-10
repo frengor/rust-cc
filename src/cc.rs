@@ -37,8 +37,11 @@ impl<T: Trace + 'static> Cc<T> {
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
+        // _tracing is used only when debug assertions are enabled
+        let (finalizing, _tracing) = state(|state| (state.is_finalizing(), state.is_tracing()));
+
         #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
+        if _tracing {
             panic!("Cannot create a new Cc while tracing!");
         }
 
@@ -46,7 +49,7 @@ impl<T: Trace + 'static> Cc<T> {
         super::trigger_collection();
 
         Cc {
-            inner: CcOnHeap::new(t),
+            inner: CcOnHeap::new(t, finalizing),
             _phantom: PhantomData,
         }
     }
@@ -202,7 +205,12 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     #[inline]
     #[track_caller]
     pub fn finalize_again(&mut self) {
-        assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
+        // The is_finalizing and is_dropping checks are necessary to avoid letting this function
+        // be called from Cc::drop implementation, since it doesn't set is_collecting to true
+        assert!(
+            state(|state| !state.is_collecting() && !state.is_finalizing() && !state.is_dropping()),
+            "Cannot schedule finalization again while collecting"
+        );
 
         self.counter_marker().set_finalized(false);
     }
@@ -352,7 +360,7 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
 impl<T: Trace + 'static> CcOnHeap<T> {
     #[inline(always)]
     #[must_use]
-    fn new(t: T) -> NonNull<CcOnHeap<T>> {
+    fn new(t: T, already_finalized: bool) -> NonNull<CcOnHeap<T>> {
         let layout = Layout::new::<CcOnHeap<T>>();
         unsafe {
             let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout);
@@ -365,7 +373,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                     vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
-                    counter_marker: CounterMarker::new_with_counter_to_one(),
+                    counter_marker: CounterMarker::new_with_counter_to_one(already_finalized),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
                 },
@@ -378,7 +386,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
-        CcOnHeap::new(t)
+        CcOnHeap::new(t, false)
     }
 }
 

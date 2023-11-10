@@ -13,6 +13,7 @@ const BITS_MASK: u32 = !(COUNTER_MASK | TRACING_COUNTER_MASK | FINALIZED_MASK);
 const FIRST_TWO_BITS_MASK: u32 = 3u32 << (u32::BITS - 2);
 
 const INITIAL_VALUE: u32 = COUNTER_MASK + 2; // +2 means that tracing counter and counter are both set to 1
+const INITIAL_VALUE_FINALIZED: u32 = INITIAL_VALUE | FINALIZED_MASK;
 
 // pub(crate) to make it available in tests
 pub(crate) const MAX: u32 = COUNTER_MASK;
@@ -42,9 +43,13 @@ pub(crate) struct OverflowError;
 impl CounterMarker {
     #[inline]
     #[must_use]
-    pub(crate) fn new_with_counter_to_one() -> CounterMarker {
+    pub(crate) fn new_with_counter_to_one(already_finalized: bool) -> CounterMarker {
         CounterMarker {
-            counter: Cell::new(INITIAL_VALUE),
+            counter: Cell::new(if !already_finalized {
+                INITIAL_VALUE
+            } else {
+                INITIAL_VALUE_FINALIZED
+            }),
         }
     }
 
