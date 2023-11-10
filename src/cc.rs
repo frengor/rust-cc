@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::counter_marker::{CounterMarker, Mark};
-use crate::state::{replace_state_field, state, try_state};
+use crate::state::{replace_state_field, state, State, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
@@ -37,21 +37,20 @@ impl<T: Trace + 'static> Cc<T> {
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
-        // _tracing is used only when debug assertions are enabled
-        let (finalizing, _tracing) = state(|state| (state.is_finalizing(), state.is_tracing()));
+        state(|state| {
+            #[cfg(debug_assertions)]
+            if state.is_tracing() {
+                panic!("Cannot create a new Cc while tracing!");
+            }
 
-        #[cfg(debug_assertions)]
-        if _tracing {
-            panic!("Cannot create a new Cc while tracing!");
-        }
+            #[cfg(feature = "auto-collect")]
+            super::trigger_collection();
 
-        #[cfg(feature = "auto-collect")]
-        super::trigger_collection();
-
-        Cc {
-            inner: CcOnHeap::new(t, finalizing),
-            _phantom: PhantomData,
-        }
+            Cc {
+                inner: CcOnHeap::new(t, state),
+                _phantom: PhantomData,
+            }
+        })
     }
 
     /*#[must_use = "newly created Cc is immediately dropped"]
@@ -360,10 +359,16 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
 impl<T: Trace + 'static> CcOnHeap<T> {
     #[inline(always)]
     #[must_use]
-    fn new(t: T, already_finalized: bool) -> NonNull<CcOnHeap<T>> {
+    fn new(t: T, state: &State) -> NonNull<CcOnHeap<T>> {
         let layout = Layout::new::<CcOnHeap<T>>();
+
+        #[cfg(feature = "finalization")]
+        let already_finalized = state.is_finalizing();
+        #[cfg(not(feature = "finalization"))]
+        let already_finalized = false;
+
         unsafe {
-            let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout);
+            let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout, state);
             ptr::write(
                 ptr.as_ptr(),
                 CcOnHeap {
@@ -386,7 +391,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
-        CcOnHeap::new(t, false)
+        state(|state| CcOnHeap::new(t, state))
     }
 }
 
