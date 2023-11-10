@@ -88,7 +88,28 @@ fn collect(state: &State, possible_cycles: &RefCell<List>) {
     let _drop_guard = DropGuard { state };
 
     #[cfg(feature = "finalization")]
-    while !is_empty(possible_cycles) {
+    for _ in 0..10 {
+        // Limit to 10 executions. A collection usually completes in 2 executions, so passing
+        // 10 and still having objects to clean up and finalize almost surely means that some
+        // finalizer is doing something weird, like the following:
+        //
+        // thread_local! { static VEC: RefCell<Vec<Cc<MyStruct>>> = ... }
+        // #[derive(Trace)]
+        // struct MyStruct { ... }
+        // impl Finalize for MyStruct {
+        //     fn finalize(&self) {
+        //         let _ = VEC.with(|vec| vec.borrow_mut().pop()); // Popping one at a time
+        //     }
+        // }
+        // Insert 100 MyStruct into VEC and then drop one -> 100 executions
+        //
+        // Thus, it is fine to just leave the remaining objects into POSSIBLE_CYCLES for the
+        // next collection execution. The program has already been stopped for too much time.
+
+        if is_empty(possible_cycles) {
+            break;
+        }
+
         __collect(state, possible_cycles);
     }
     #[cfg(not(feature = "finalization"))]
