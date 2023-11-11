@@ -135,7 +135,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
             panic!("Cannot initialize a Cc while tracing!");
         }
 
-        remove_from_list(self.inner.cast());
+        self.mark_alive();
 
         // The counter should not be updated since we're taking self
         let cc = Cc {
@@ -167,7 +167,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
         // This prevents race conditions
         assert!(self.is_unique(), "Cc is not unique");
 
-        remove_from_list(self.inner.cast());
+        self.mark_alive();
 
         unsafe {
             self.inner.as_mut().elem.get_mut().write(value);
@@ -249,7 +249,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
             panic!("Too many references has been created to a single Cc");
         }
 
-        remove_from_list(self.inner.cast());
+        self.mark_alive();
 
         // It's always safe to clone a Cc
         Cc {
@@ -270,7 +270,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
             panic!("Cannot deref while tracing!");
         }
 
-        //remove_from_list(self.inner.cast());
+        //self.mark_alive();
 
         self.inner().get_elem()
     }
