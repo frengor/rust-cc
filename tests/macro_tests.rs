@@ -1,5 +1,6 @@
+#![cfg(feature = "derive")]
+
 #[cfg(not(miri))]
-#[cfg(feature = "derive")]
 #[test]
 fn macro_tests() {
     let t = trybuild::TestCases::new();
