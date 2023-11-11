@@ -27,6 +27,7 @@ nightly = ["rust-cc-derive?/nightly"]
 derive = ["dep:rust-cc-derive"]
 auto-collect = []
 finalization = []
+weak-ptr = []
 pedantic-debug-assertions = []
 
 [dependencies]

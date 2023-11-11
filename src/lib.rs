@@ -29,6 +29,9 @@ pub mod config;
 #[cfg(feature = "derive")]
 pub use rust_cc_derive::{Finalize, Trace};
 
+#[cfg(feature = "weak-ptr")]
+pub mod weak;
+
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 

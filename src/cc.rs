@@ -231,8 +231,18 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 
     #[inline(always)]
-    fn inner(&self) -> &CcOnHeap<T> {
+    pub(crate) fn inner(&self) -> &CcOnHeap<T> {
         unsafe { self.inner.as_ref() }
+    }
+
+    #[cfg(feature = "weak-ptr")] // Currently used only here
+    #[inline(always)]
+    #[must_use]
+    pub(crate) fn __new_internal(inner: NonNull<CcOnHeap<T>>) -> Cc<T> {
+        Cc {
+            inner,
+            _phantom: PhantomData,
+        }
     }
 }
 
