@@ -384,10 +384,10 @@ fn no_cyclic_finalization_ends() {
 
     impl Finalize for ToFinalize {
         fn finalize(&self) {
-            let cc = Cc::new(ToFinalize);
+            let _cc = Cc::new(ToFinalize);
 
             #[cfg(feature = "finalization")]
-            assert!(cc.already_finalized());
+            assert!(_cc.already_finalized());
         }
     }
 
@@ -418,10 +418,10 @@ fn cyclic_finalization_ends() {
 
     impl Finalize for Cyclic {
         fn finalize(&self) {
-            let cc = Cyclic::new();
+            let _cc = Cyclic::new();
 
             #[cfg(feature = "finalization")]
-            assert!(cc.already_finalized());
+            assert!(_cc.already_finalized());
         }
     }
 
