@@ -56,7 +56,7 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
 
     #[inline]
     pub fn ptr_eq(this: &Weak<T>, other: &Weak<T>) -> bool {
-        this.metadata().is_accessible() && other.metadata().is_accessible() && this.cc.as_ptr() == other.cc.as_ptr()
+        ptr::eq(this.metadata.as_ptr() as *const (), other.metadata.as_ptr() as *const ())
     }
 
     #[inline]

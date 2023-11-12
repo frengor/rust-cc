@@ -187,7 +187,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
 impl<T: ?Sized + Trace + 'static> Cc<T> {
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
-        this.inner.as_ptr() == other.inner.as_ptr()
+        ptr::eq(this.inner.as_ptr() as *const (), other.inner.as_ptr() as *const ())
     }
 
     #[inline]
