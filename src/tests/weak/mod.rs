@@ -1,7 +1,5 @@
-#![cfg(feature = "weak-ptr")]
-
-use rust_cc::*;
-use rust_cc::weak::{Weak, Weakable, WeakableCc};
+use crate::*;
+use crate::weak::{Weak, Weakable, WeakableCc};
 
 #[test]
 fn weak_test() {
@@ -86,4 +84,77 @@ fn weak_dst() {
     let cc1: WeakableCc<dyn Trace> = cc.clone();
     let _weak: Weak<dyn Trace> = cc.downgrade();
     let _weak1: Weak<dyn Trace> = cc1.downgrade();
+}
+
+#[test]
+fn test_new_cyclic() {
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+        int: i32,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {}
+
+    let cyclic = Cc::new_cyclic(|weak| {
+        assert_eq!(1, weak.weak_count());
+        assert_eq!(0, weak.strong_count());
+        assert!(weak.upgrade().is_none());
+        Cyclic {
+            weak: weak.clone(),
+            int: 5,
+        }
+    });
+
+    assert_eq!(1, cyclic.weak_count());
+    assert_eq!(1, cyclic.strong_count());
+
+    assert_eq!(5, cyclic.int);
+    assert!(Cc::ptr_eq(&cyclic.weak.upgrade().unwrap(), &cyclic));
+}
+
+#[test]
+#[should_panic(expected = "Expected panic during new_cyclic!")]
+fn panicking_new_cyclic1() {
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {}
+
+    let _cc = Cc::new_cyclic(|_| {
+        panic!("Expected panic during new_cyclic!");
+    });
+}
+
+#[test]
+#[should_panic(expected = "Expected panic during new_cyclic!")]
+fn panicking_new_cyclic2() {
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {}
+
+    let _cc = Cc::new_cyclic(|weak| {
+        let _weak = weak.clone();
+        panic!("Expected panic during new_cyclic!");
+    });
 }

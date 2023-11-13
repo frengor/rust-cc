@@ -14,6 +14,9 @@ mod list;
 mod panicking;
 mod counter_marker;
 
+#[cfg(feature = "weak-ptr")]
+mod weak;
+
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
         pc.replace(List::new());
