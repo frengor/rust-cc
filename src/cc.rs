@@ -235,6 +235,12 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         unsafe { self.inner.as_ref() }
     }
 
+    #[cfg(feature = "weak-ptr")]
+    #[inline(always)]
+    pub(crate) fn inner_ptr(&self) -> NonNull<CcOnHeap<T>> {
+        self.inner
+    }
+
     #[cfg(feature = "weak-ptr")] // Currently used only here
     #[inline(always)]
     #[must_use]
@@ -414,6 +420,11 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     #[inline]
     pub(crate) fn get_elem(&self) -> &T {
         unsafe { &*self.elem.get() }
+    }
+
+    #[inline]
+    pub(crate) fn get_elem_mut(&self) -> *mut T {
+        self.elem.get()
     }
 
     #[inline]
@@ -696,6 +707,6 @@ impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
     }
 
     unsafe fn drop_elem(&self) {
-        drop_in_place(self.elem.get());
+        drop_in_place(self.get_elem_mut());
     }
 }
