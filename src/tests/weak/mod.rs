@@ -1,8 +1,11 @@
 use crate::*;
+use crate::state::reset_state;
 use crate::weak::{Weak, Weakable, WeakableCc};
 
 #[test]
 fn weak_test() {
+    reset_state();
+
     let (cc, weak) = weak_test_common();
     drop(cc);
     assert_eq!(1, weak.weak_count());
@@ -22,6 +25,8 @@ fn weak_test() {
 
 #[test]
 fn weak_test2() {
+    reset_state();
+
     let (cc, weak) = weak_test_common();
     drop(weak);
     assert_eq!(1, cc.strong_count());
@@ -37,6 +42,8 @@ fn weak_test2() {
 }
 
 fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
+    reset_state();
+
     let cc: Cc<Weakable<i32>> = WeakableCc::new_weakable(0i32);
     let cc1 = cc.clone();
     let weak = cc.downgrade();
@@ -80,6 +87,8 @@ fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
 #[cfg(feature = "nightly")]
 #[test]
 fn weak_dst() {
+    reset_state();
+
     let cc = Cc::new_weakable(0i32);
     let cc1: WeakableCc<dyn Trace> = cc.clone();
     let _weak: Weak<dyn Trace> = cc.downgrade();
@@ -88,6 +97,8 @@ fn weak_dst() {
 
 #[test]
 fn test_new_cyclic() {
+    reset_state();
+
     struct Cyclic {
         weak: Weak<Cyclic>,
         int: i32,
@@ -121,6 +132,8 @@ fn test_new_cyclic() {
 #[test]
 #[should_panic(expected = "Expected panic during new_cyclic!")]
 fn panicking_new_cyclic1() {
+    reset_state();
+
     struct Cyclic {
         weak: Weak<Cyclic>,
     }
@@ -141,6 +154,8 @@ fn panicking_new_cyclic1() {
 #[test]
 #[should_panic(expected = "Expected panic during new_cyclic!")]
 fn panicking_new_cyclic2() {
+    reset_state();
+
     struct Cyclic {
         weak: Weak<Cyclic>,
     }
