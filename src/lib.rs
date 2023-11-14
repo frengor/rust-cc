@@ -32,6 +32,9 @@ pub use rust_cc_derive::{Finalize, Trace};
 #[cfg(feature = "weak-ptr")]
 pub mod weak;
 
+#[cfg(feature = "cleaners")]
+pub mod cleaners;
+
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 

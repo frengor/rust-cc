@@ -17,6 +17,9 @@ mod counter_marker;
 #[cfg(feature = "weak-ptr")]
 mod weak;
 
+#[cfg(feature = "cleaners")]
+mod cleaners;
+
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
         pc.replace(List::new());

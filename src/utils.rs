@@ -23,7 +23,7 @@ pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
     dealloc(ptr.cast().as_ptr(), layout);
 }
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(any(feature = "weak-ptr", feature = "cleaners"))]
 #[inline]
 pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
     let layout = Layout::new::<T>();
@@ -33,7 +33,7 @@ pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
     }
 }
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(any(feature = "weak-ptr", feature = "cleaners"))]
 #[inline]
 pub(crate) unsafe fn dealloc_other<T>(ptr: NonNull<T>) {
     let layout = Layout::new::<T>();
