@@ -187,7 +187,7 @@ impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
 impl<T: ?Sized + Trace + 'static> Cc<T> {
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
-        this.inner.as_ptr() == other.inner.as_ptr()
+        ptr::eq(this.inner.as_ptr() as *const (), other.inner.as_ptr() as *const ())
     }
 
     #[inline]
@@ -231,8 +231,24 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 
     #[inline(always)]
-    fn inner(&self) -> &CcOnHeap<T> {
+    pub(crate) fn inner(&self) -> &CcOnHeap<T> {
         unsafe { self.inner.as_ref() }
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline(always)]
+    pub(crate) fn inner_ptr(&self) -> NonNull<CcOnHeap<T>> {
+        self.inner
+    }
+
+    #[cfg(feature = "weak-ptr")] // Currently used only here
+    #[inline(always)]
+    #[must_use]
+    pub(crate) fn __new_internal(inner: NonNull<CcOnHeap<T>>) -> Cc<T> {
+        Cc {
+            inner,
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -404,6 +420,11 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     #[inline]
     pub(crate) fn get_elem(&self) -> &T {
         unsafe { &*self.elem.get() }
+    }
+
+    #[inline]
+    pub(crate) fn get_elem_mut(&self) -> *mut T {
+        self.elem.get()
     }
 
     #[inline]
@@ -686,6 +707,6 @@ impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
     }
 
     unsafe fn drop_elem(&self) {
-        drop_in_place(self.elem.get());
+        drop_in_place(self.get_elem_mut());
     }
 }

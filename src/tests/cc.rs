@@ -374,6 +374,8 @@ fn test_init() {
 
 #[test]
 fn no_cyclic_finalization_ends() {
+    reset_state();
+
     struct ToFinalize;
 
     unsafe impl Trace for ToFinalize {
@@ -396,6 +398,8 @@ fn no_cyclic_finalization_ends() {
 
 #[test]
 fn cyclic_finalization_ends() {
+    reset_state();
+
     struct Cyclic {
         cyclic: RefCell<Option<Cc<Cyclic>>>,
     }
