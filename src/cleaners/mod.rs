@@ -10,7 +10,7 @@ new_key_type! {
 }
 
 struct CleanerMap {
-    map: RefCell<SlotMap<CleanerKey, CleanerFn>>,
+    map: RefCell<Option<SlotMap<CleanerKey, CleanerFn>>>, // The Option is used to avoid allocating until a cleaner is registered
 }
 
 unsafe impl Trace for CleanerMap {
@@ -41,18 +41,34 @@ impl Cleaner {
     pub fn new() -> Cleaner {
         Cleaner {
             cleaner_map: WeakableCc::new_weakable(CleanerMap {
-                map: RefCell::new(SlotMap::with_capacity_and_key(3)),
+                map: RefCell::new(None),
             }),
         }
     }
 
     #[inline]
     pub fn register(&self, cleaner: impl FnOnce() + 'static) -> Cleanable {
-        let key = self.cleaner_map.map.borrow_mut().insert(CleanerFn(Some(Box::new(cleaner))));
+        let map_key = {
+            let map = &mut *self.cleaner_map.map.borrow_mut();
+
+            if map.is_none() {
+                *map = Some(SlotMap::with_capacity_and_key(3));
+            }
+
+            // The unwrap should never fail and should be optimized out by the compiler
+            map.as_mut().unwrap().insert(CleanerFn(Some(Box::new(cleaner))))
+        };
+
         Cleanable {
             cleaner_map: self.cleaner_map.downgrade(),
-            key,
+            key: map_key,
         }
+    }
+
+    // For tests
+    #[cfg(test)]
+    pub(crate) fn has_allocated(&self) -> bool {
+        self.cleaner_map.map.borrow().is_some()
     }
 }
 
@@ -86,11 +102,14 @@ pub struct Cleanable {
 impl Cleanable {
     #[inline]
     pub fn clean(self) {
-        if let Some(cc) = self.cleaner_map.upgrade() {
-            if let Ok(mut map) = cc.map.try_borrow_mut() {
-                let _ = map.remove(self.key);
-            }
-        }
+        // Try upgrading to see if the CleanerMap hasn't been deallocated
+        let Some(cc) = self.cleaner_map.upgrade() else { return };
+
+        // Just return in case try_borrow_mut fails or the map is None
+        // (the latter shouldn't happen, but better be sure)
+        let Ok(mut ref_mut) = cc.map.try_borrow_mut() else { return };
+        let Some(map) = &mut *ref_mut else { return };
+        map.remove(self.key);
     }
 }
 

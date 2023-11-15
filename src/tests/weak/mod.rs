@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use crate::*;
 use crate::state::reset_state;
 use crate::weak::{Weak, Weakable, WeakableCc};
@@ -45,8 +46,17 @@ fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
     reset_state();
 
     let cc: Cc<Weakable<i32>> = WeakableCc::new_weakable(0i32);
+
+    assert!(!cc.deref().has_allocated());
+
     let cc1 = cc.clone();
+
+    assert!(!cc.deref().has_allocated());
+
     let weak = cc.downgrade();
+
+    assert!(cc.deref().has_allocated());
+
     assert_eq!(2, cc.strong_count());
     assert_eq!(1, weak.weak_count());
     assert_eq!(cc.strong_count(), weak.strong_count());
@@ -121,6 +131,8 @@ fn test_new_cyclic() {
             int: 5,
         }
     });
+
+    assert!(cyclic.deref().has_allocated());
 
     assert_eq!(1, cyclic.weak_count());
     assert_eq!(1, cyclic.strong_count());

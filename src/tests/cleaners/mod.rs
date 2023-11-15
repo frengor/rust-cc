@@ -70,11 +70,17 @@ fn clean_before_drop() {
 }
 
 fn register_cleaner(already_cleaned: &Rc<Cell<bool>>, cleaner: &Cleaner) -> Cleanable {
+    assert!(!cleaner.has_allocated());
+
     let already_cleaned = already_cleaned.clone();
-    cleaner.register(move || {
+    let cleanable = cleaner.register(move || {
         assert!(!already_cleaned.get(), "Already cleaned!");
         already_cleaned.set(true);
-    })
+    });
+
+    assert!(cleaner.has_allocated());
+
+    cleanable
 }
 
 #[test]
@@ -97,6 +103,8 @@ fn clean_with_cyclic_cc() {
 
     let already_cleaned = Rc::new(Cell::new(false));
 
+    assert!(!to_clean.cleaner.has_allocated());
+
     let cleaner = {
         let cloned = to_clean.clone();
         let cloned_ac = already_cleaned.clone();
@@ -106,6 +114,8 @@ fn clean_with_cyclic_cc() {
             cloned_ac.set(true);
         })
     };
+
+    assert!(to_clean.cleaner.has_allocated());
 
     assert!(!already_cleaned.get());
 

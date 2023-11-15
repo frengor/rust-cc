@@ -6,6 +6,7 @@ use std::{
     marker::Unsize,
     ops::CoerceUnsized,
 };
+use std::cell::Cell;
 use std::mem::MaybeUninit;
 
 use crate::cc::CcOnHeap;
@@ -129,7 +130,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for Weak<T> {
 }
 
 pub struct Weakable<T: ?Sized + Trace + 'static> {
-    metadata: NonNull<WeakMetadata>,
+    metadata: Cell<Option<NonNull<WeakMetadata>>>, // the Option is used to avoid allocating until a Weak is created
     elem: T,
 }
 
@@ -138,7 +139,7 @@ impl<T: Trace + 'static> Weakable<T> {
     #[must_use = "newly created Weakable is immediately dropped"]
     pub fn new(t: T) -> Weakable<T> {
         Weakable {
-            metadata: alloc_metadata(WeakMetadata::new(true)),
+            metadata: Cell::new(None),
             elem: t,
         }
     }
@@ -157,9 +158,22 @@ fn alloc_metadata(metadata: WeakMetadata) -> NonNull<WeakMetadata> {
 }
 
 impl<T: ?Sized + Trace + 'static> Weakable<T> {
-    #[inline(always)]
-    fn metadata(&self) -> &WeakMetadata {
-        unsafe { self.metadata.as_ref() }
+    #[inline]
+    fn init_get_metadata(&self) -> NonNull<WeakMetadata> {
+        match self.metadata.get() {
+            Some(ptr) => ptr,
+            None => {
+                let ptr = alloc_metadata(WeakMetadata::new(true));
+                self.metadata.set(Some(ptr));
+                ptr
+            }
+        }
+    }
+
+    // For tests
+    #[cfg(test)]
+    pub(crate) fn has_allocated(&self) -> bool {
+        self.metadata.get().is_some()
     }
 }
 
@@ -182,7 +196,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
         }
 
         let invalid_cc = Cc::new(Weakable::new(MaybeUninit::uninit()));
-        let metadata: NonNull<WeakMetadata> = invalid_cc.metadata;
+        let metadata: NonNull<WeakMetadata> = invalid_cc.init_get_metadata();
 
         // Set weak counter to 1
         // This is done after creating the Cc to make sure that if Cc::new panics the metadata allocation isn't leaked
@@ -263,14 +277,16 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
             panic!("Cannot downgrade while tracing!");
         }
 
-        if self.metadata().increment_counter().is_err() {
+        let metadata = self.init_get_metadata();
+
+        if unsafe { metadata.as_ref() }.increment_counter().is_err() {
             panic!("Too many references has been created to a single Weak");
         }
 
         self.mark_alive();
 
         Weak {
-            metadata: self.metadata,
+            metadata,
             cc: self.inner_ptr(),
         }
     }
@@ -278,12 +294,11 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
     #[inline]
     pub fn weak_count(&self) -> u32 {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
-        self.metadata().counter() as u32
-    }
-
-    #[inline(always)]
-    fn metadata(&self) -> &WeakMetadata {
-        unsafe { self.metadata.as_ref() }
+        if let Some(metadata) = self.metadata.get() {
+            unsafe { metadata.as_ref().counter() as u32 }
+        } else {
+            0
+        }
     }
 }
 
@@ -299,13 +314,15 @@ impl<T: ?Sized + Trace + 'static> Deref for Weakable<T> {
 impl<T: ?Sized + Trace + 'static> Drop for Weakable<T> {
     #[inline]
     fn drop(&mut self) {
-        unsafe {
-            if self.metadata().counter() == 0 {
-                // There are no weak pointers, deallocate the metadata
-                dealloc_other(self.metadata);
-            } else {
-                // There exist weak pointers, set the CcOnHeap allocation not accessible
-                self.metadata().set_accessible(false);
+        if let Some(metadata) = self.metadata.get() {
+            unsafe {
+                if metadata.as_ref().counter() == 0 {
+                    // There are no weak pointers, deallocate the metadata
+                    dealloc_other(metadata);
+                } else {
+                    // There exist weak pointers, set the CcOnHeap allocation not accessible
+                    metadata.as_ref().set_accessible(false);
+                }
             }
         }
     }
