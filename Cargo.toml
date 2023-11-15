@@ -44,3 +44,7 @@ trybuild = "1.0.85"
 [[bench]]
 name = "bench"
 harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "doc_auto_cfg", "--generate-link-to-definition"]
