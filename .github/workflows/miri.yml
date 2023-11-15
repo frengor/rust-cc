@@ -18,7 +18,9 @@ jobs:
           rustup override set nightly
           cargo miri setup
       - uses: taiki-e/install-action@cargo-hack
+      # Always skip "derive" since derive macro tests are skipped on Miri
+      # Also always keep "pedantic-debug-assertions" enabled
       - name: Run tests
-        run: cargo hack miri test --feature-powerset --skip nightly --verbose --workspace
+        run: cargo hack miri test --feature-powerset --skip nightly,derive --verbose --workspace -F pedantic-debug-assertions
       - name: Run tests (nightly)
-        run: cargo hack miri test --feature-powerset --verbose --workspace -F nightly
+        run: cargo hack miri test --feature-powerset --skip derive --verbose --workspace -F nightly,pedantic-debug-assertions
