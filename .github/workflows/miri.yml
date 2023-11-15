@@ -19,8 +19,9 @@ jobs:
           cargo miri setup
       - uses: taiki-e/install-action@cargo-hack
       # Always skip "derive" since derive macro tests are skipped on Miri
-      # Also always keep "pedantic-debug-assertions" enabled
+      # Also always keep "pedantic-debug-assertions" enabled to reduce build times
+      # Note: no need to use --workspace here, since there's no unsafe in rust-cc-derive
       - name: Run tests
-        run: cargo hack miri test --feature-powerset --skip nightly,derive --verbose --workspace -F pedantic-debug-assertions
+        run: cargo hack miri test --feature-powerset --skip nightly,derive --verbose -F pedantic-debug-assertions
       - name: Run tests (nightly)
-        run: cargo hack miri test --feature-powerset --skip derive --verbose --workspace -F nightly,pedantic-debug-assertions
+        run: cargo hack miri test --feature-powerset --skip derive --verbose -F nightly,pedantic-debug-assertions

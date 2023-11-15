@@ -28,6 +28,7 @@ jobs:
           components: clippy
       - uses: taiki-e/install-action@cargo-hack
       - name: Check and Clippy (nightly)
+        # No need to use --workspace here, since there's no nightly feature in rust-cc-derive
         run: |
-          cargo hack check --feature-powerset --clean-per-run --verbose --workspace -F nightly
-          cargo hack clippy --feature-powerset --clean-per-run --verbose --workspace -F nightly -- -D warnings
+          cargo hack check --feature-powerset --clean-per-run --verbose -F nightly
+          cargo hack clippy --feature-powerset --clean-per-run --verbose -F nightly -- -D warnings

@@ -23,7 +23,7 @@ edition = "2021"
 
 [features]
 default = ["auto-collect", "finalization", "derive"]
-nightly = ["rust-cc-derive?/nightly"]
+nightly = []
 derive = ["dep:rust-cc-derive"]
 auto-collect = []
 finalization = []
