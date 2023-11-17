@@ -1,4 +1,4 @@
-name: Check and Clippy
+name: Build
 
 on: [push, pull_request]
 
