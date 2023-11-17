@@ -36,3 +36,12 @@ jobs:
         run: |
           cargo hack check --all-targets --feature-powerset --clean-per-run --verbose -F nightly
           cargo hack clippy --all-targets --feature-powerset --clean-per-run --verbose -F nightly -- -D warnings
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Build docs
+        run: cargo doc --no-deps --all-features --verbose
