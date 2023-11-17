@@ -170,8 +170,7 @@ impl<T: ?Sized + Trace + 'static> Weakable<T> {
         }
     }
 
-    // For tests
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     pub(crate) fn has_allocated(&self) -> bool {
         self.metadata.get().is_some()
     }

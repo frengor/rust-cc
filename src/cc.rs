@@ -409,7 +409,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline(always)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
         state(|state| CcOnHeap::new(t, state))

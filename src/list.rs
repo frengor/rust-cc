@@ -14,7 +14,7 @@ impl List {
     }
 
     #[inline]
-    #[cfg(test)] // Only used in tests
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
         self.first
     }
@@ -95,7 +95,7 @@ impl List {
     }
 
     #[inline]
-    #[allow(unused)]
+    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
     pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
         self.iter().any(|elem| elem == ptr)
     }
@@ -106,7 +106,7 @@ impl List {
     }
 
     #[inline]
-    #[cfg(test)] // Only used in tests
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     pub(crate) fn into_iter(self) -> ListIter {
         <Self as IntoIterator>::into_iter(self)
     }

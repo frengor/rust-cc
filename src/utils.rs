@@ -71,6 +71,7 @@ macro_rules! rust_cc_thread_local {
     );
 
     ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = $init:expr) => (
+        #[allow(clippy::declare_interior_mutable_const)]
         const INIT: $t = $init;
 
         #[thread_local]

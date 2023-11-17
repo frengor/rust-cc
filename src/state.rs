@@ -32,7 +32,7 @@ impl From<utils::AccessError> for StateAccessError {
     }
 }
 
-#[cfg(test)] // Used in tests
+#[cfg(all(test, feature = "std"))] // Only used in unit tests
 pub(crate) fn reset_state() {
     state(|state| {
         state.collecting.set(false);
