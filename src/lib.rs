@@ -1,11 +1,19 @@
 #![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata))]
+#![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(thread_local, error_in_core))] // no-std related unstable features
 #![cfg_attr(doc_auto_cfg, feature(doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use std::cell::RefCell;
-use std::mem;
-use std::mem::ManuallyDrop;
-use std::ptr::NonNull;
+#[cfg(all(not(feature = "std"), not(feature = "nightly")))]
+compile_error!("Feature \"std\" cannot be disabled without enabling feature \"nightly\" (due to #[thread_local] not being stable).");
+
+extern crate alloc;
+
+use core::cell::RefCell;
+use core::mem;
+use core::mem::ManuallyDrop;
+use core::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
 use crate::counter_marker::Mark;
@@ -14,7 +22,7 @@ use crate::state::{replace_state_field, State, try_state};
 use crate::trace::ContextInner;
 use crate::utils::*;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 mod cc;
@@ -39,7 +47,7 @@ pub mod cleaners;
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 
-thread_local! {
+rust_cc_thread_local! {
     pub(crate) static POSSIBLE_CYCLES: RefCell<List> = RefCell::new(List::new());
 }
 

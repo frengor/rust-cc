@@ -1,9 +1,9 @@
-use std::alloc::Layout;
-use std::cell::Cell;
-use std::thread::AccessError;
+use alloc::alloc::Layout;
+use core::cell::Cell;
 use thiserror::Error;
+use crate::utils;
 
-thread_local! {
+utils::rust_cc_thread_local! {
     static STATE: State = const { State::new() };
 }
 
@@ -21,8 +21,15 @@ pub(crate) fn try_state<R>(f: impl FnOnce(&State) -> R) -> Result<R, StateAccess
 #[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum StateAccessError {
-    #[error(transparent)]
-    AccessError(#[from] AccessError),
+    #[error("couldn't access the state")]
+    AccessError,
+}
+
+// Implement without macro since utils::AccessError is an implementation detail
+impl From<utils::AccessError> for StateAccessError {
+    fn from(_: utils::AccessError) -> Self {
+        Self::AccessError
+    }
 }
 
 #[cfg(test)] // Used in tests
@@ -145,12 +152,12 @@ impl Default for State {
 
 #[inline]
 pub fn allocated_bytes() -> Result<usize, StateAccessError> {
-    STATE.try_with(|state| Ok(state.allocated_bytes()))?
+    try_state(|state| Ok(state.allocated_bytes()))?
 }
 
 #[inline]
 pub fn executions_count() -> Result<usize, StateAccessError> {
-    STATE.try_with(|state| Ok(state.executions_count()))?
+    try_state(|state| Ok(state.executions_count()))?
 }
 
 /// Utility macro used internally to implement drop guards that accesses the state
@@ -172,7 +179,7 @@ macro_rules! replace_state_field {
                 old_value: $field_type,
             }
 
-            impl<'a> ::std::ops::Drop for DropGuard<'a> {
+            impl<'a> ::core::ops::Drop for DropGuard<'a> {
                 #[inline]
                 fn drop(&mut self) {
                     $crate::state::State::$set_name(self.state, self.old_value);

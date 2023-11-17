@@ -1,16 +1,24 @@
-use std::cell::RefCell;
-use std::ffi::{CStr, CString, OsStr, OsString};
-use std::marker::PhantomData;
-use std::mem::{ManuallyDrop, MaybeUninit};
-use std::num::{
+use core::cell::RefCell;
+use core::ffi::CStr;
+use core::marker::PhantomData;
+use core::mem::{ManuallyDrop, MaybeUninit};
+use core::num::{
     NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU128,
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
-use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{
+use core::panic::AssertUnwindSafe;
+use core::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
+};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use alloc::ffi::CString;
+use alloc::string::String;
+#[cfg(feature = "std")]
+use std::{
+    path::{Path, PathBuf},
+    ffi::{OsStr, OsString}
 };
 
 use crate::List;
@@ -162,10 +170,10 @@ pub trait Finalize {
 /// [`Finalize`]: crate::Finalize
 /// [`finalize`]: crate::Finalize::finalize
 /// [`Cc`]: crate::Cc
-/// [`Drop`]: std::ops::Drop
-/// [`Rc`]: std::rc::Rc
-/// [`Box`]: std::boxed::Box
-/// [`drop`]: std::ops::Drop::drop
+/// [`Drop`]: core::ops::Drop
+/// [`Rc`]: alloc::rc::Rc
+/// [`Box`]: alloc::boxed::Box
+/// [`drop`]: core::ops::Drop::drop
 pub unsafe trait Trace: Finalize {
     fn trace(&self, ctx: &mut Context<'_>);
 }
@@ -243,12 +251,8 @@ empty_trace! {
     f64,
     char,
     str,
-    Path,
     CStr,
-    OsStr,
     String,
-    PathBuf,
-    OsString,
     CString,
     NonZeroIsize,
     NonZeroUsize,
@@ -273,6 +277,14 @@ empty_trace! {
     AtomicU32,
     AtomicI64,
     AtomicU64,
+}
+
+#[cfg(feature = "std")]
+empty_trace! {
+    Path,
+    OsStr,
+    PathBuf,
+    OsString,
 }
 
 unsafe impl<T> Trace for MaybeUninit<T> {
@@ -300,7 +312,7 @@ macro_rules! deref_trace {
         {
             #[inline]
             fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
-                let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
+                let deref: &$generic = <$this as ::core::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Trace>::trace(deref, ctx);
             }
         }
@@ -309,7 +321,7 @@ macro_rules! deref_trace {
         {
             #[inline]
             fn finalize(&self) {
-                let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
+                let deref: &$generic = <$this as ::core::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Finalize>::finalize(deref);
             }
         }
@@ -319,7 +331,7 @@ macro_rules! deref_trace {
 macro_rules! deref_traces {
     ($($this:tt),*,) => {
         $(
-            deref_trace!{T; $this<T>; ?::std::marker::Sized +}
+            deref_trace!{T; $this<T>; ?::core::marker::Sized +}
         )*
     }
 }

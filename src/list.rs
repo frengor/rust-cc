@@ -1,5 +1,5 @@
-use std::marker::PhantomData;
-use std::ptr::NonNull;
+use core::marker::PhantomData;
+use core::ptr::NonNull;
 
 use crate::{CcOnHeap, Mark};
 
@@ -9,7 +9,7 @@ pub(crate) struct List {
 
 impl List {
     #[inline]
-    pub(crate) fn new() -> List {
+    pub(crate) const fn new() -> List {
         List { first: None }
     }
 
@@ -132,7 +132,7 @@ impl List {
             self.first = to_append.first;
             // to_append.first.prev is already None
         }
-        std::mem::forget(to_append); // Don't run to_append destructor
+        core::mem::forget(to_append); // Don't run to_append destructor
     }
 }
 

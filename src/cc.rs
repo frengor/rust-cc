@@ -1,12 +1,12 @@
-use std::alloc::Layout;
-use std::cell::UnsafeCell;
-use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
-use std::ops::Deref;
-use std::ptr::{self, drop_in_place, NonNull};
-use std::rc::Rc;
+use alloc::alloc::Layout;
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::mem::{self, MaybeUninit};
+use core::ops::Deref;
+use core::ptr::{self, drop_in_place, NonNull};
+use alloc::rc::Rc;
 #[cfg(feature = "nightly")]
-use std::{
+use core::{
     marker::Unsize,
     ops::CoerceUnsized,
     ptr::{metadata, DynMetadata},

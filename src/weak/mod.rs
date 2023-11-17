@@ -1,13 +1,13 @@
-use std::ops::Deref;
-use std::{mem, ptr};
-use std::ptr::{drop_in_place, NonNull};
+use core::ops::Deref;
+use core::{mem, ptr};
+use core::ptr::{drop_in_place, NonNull};
 #[cfg(feature = "nightly")]
-use std::{
+use core::{
     marker::Unsize,
     ops::CoerceUnsized,
 };
-use std::cell::Cell;
-use std::mem::MaybeUninit;
+use core::cell::Cell;
+use core::mem::MaybeUninit;
 
 use crate::cc::CcOnHeap;
 use crate::state::state;
