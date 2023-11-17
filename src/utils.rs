@@ -45,10 +45,7 @@ pub(crate) unsafe fn dealloc_other<T>(ptr: NonNull<T>) {
 pub(crate) fn cold() {}
 
 #[cfg(feature = "std")]
-pub(crate) use std::{
-    thread_local as rust_cc_thread_local, // Use the std's macro when std is enabled
-    thread::AccessError,
-};
+pub(crate) use std::thread_local as rust_cc_thread_local; // Use the std's macro when std is enabled
 
 #[cfg(not(feature = "std"))]
 macro_rules! rust_cc_thread_local {

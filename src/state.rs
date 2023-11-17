@@ -10,12 +10,12 @@ utils::rust_cc_thread_local! {
 #[inline]
 pub(crate) fn state<R>(f: impl FnOnce(&State) -> R) -> R {
     // Use try_state instead of state.with(...) since with is not marked as inline
-    try_state(f).unwrap_or_else(|err| panic!("Couldn't access state: {}", err))
+    try_state(f).unwrap_or_else(|_| panic!("Couldn't access the state"))
 }
 
 #[inline]
 pub(crate) fn try_state<R>(f: impl FnOnce(&State) -> R) -> Result<R, StateAccessError> {
-    STATE.try_with(|state| Ok(f(state)))?
+    STATE.try_with(|state| Ok(f(state))).unwrap_or(Err(StateAccessError::AccessError))
 }
 
 #[non_exhaustive]
@@ -23,13 +23,6 @@ pub(crate) fn try_state<R>(f: impl FnOnce(&State) -> R) -> Result<R, StateAccess
 pub enum StateAccessError {
     #[error("couldn't access the state")]
     AccessError,
-}
-
-// Implement without macro since utils::AccessError is an implementation detail
-impl From<utils::AccessError> for StateAccessError {
-    fn from(_: utils::AccessError) -> Self {
-        Self::AccessError
-    }
 }
 
 #[cfg(all(test, feature = "std"))] // Only used in unit tests

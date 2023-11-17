@@ -1,5 +1,4 @@
-use core::cell::{BorrowMutError, RefCell};
-use core::ops::DerefMut;
+use core::cell::RefCell;
 
 use thiserror::Error;
 
@@ -16,7 +15,12 @@ pub fn config<F, R>(f: F) -> Result<R, ConfigAccessError>
 where
     F: FnOnce(&mut Config) -> R,
 {
-    CONFIG.try_with(|config| Ok(f(config.try_borrow_mut()?.deref_mut())))?
+    CONFIG.try_with(|config| {
+        config
+        .try_borrow_mut()
+        .or(Err(ConfigAccessError::BorrowMutError))
+        .map(|mut config| f(&mut config))
+    }).unwrap_or(Err(ConfigAccessError::AccessError))
 }
 
 #[non_exhaustive]
@@ -24,14 +28,8 @@ where
 pub enum ConfigAccessError {
     #[error("couldn't access the configuration")]
     AccessError,
-    #[error(transparent)]
-    BorrowMutError(#[from] BorrowMutError),
-}
-
-impl From<utils::AccessError> for ConfigAccessError {
-    fn from(_: utils::AccessError) -> Self {
-        Self::AccessError
-    }
+    #[error("couldn't borrow the configuration mutably")]
+    BorrowMutError,
 }
 
 #[derive(Debug, Clone)]
