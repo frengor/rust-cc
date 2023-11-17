@@ -45,6 +45,7 @@ trybuild = "1.0.85"
 [[bench]]
 name = "bench"
 harness = false
+required-features = ["std", "derive"]
 
 [package.metadata.docs.rs]
 all-features = true
