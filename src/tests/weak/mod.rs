@@ -1,4 +1,5 @@
 use std::ops::Deref;
+use std::panic::catch_unwind;
 use crate::*;
 use crate::state::reset_state;
 use crate::weak::{Weak, Weakable, WeakableCc};
@@ -142,7 +143,7 @@ fn test_new_cyclic() {
 }
 
 #[test]
-#[should_panic(expected = "Expected panic during new_cyclic!")]
+#[should_panic(expected = "Expected panic during panicking_new_cyclic1!")]
 fn panicking_new_cyclic1() {
     reset_state();
 
@@ -159,12 +160,12 @@ fn panicking_new_cyclic1() {
     impl Finalize for Cyclic {}
 
     let _cc = Cc::new_cyclic(|_| {
-        panic!("Expected panic during new_cyclic!");
+        panic!("Expected panic during panicking_new_cyclic1!");
     });
 }
 
 #[test]
-#[should_panic(expected = "Expected panic during new_cyclic!")]
+#[should_panic(expected = "Expected panic during panicking_new_cyclic2!")]
 fn panicking_new_cyclic2() {
     reset_state();
 
@@ -182,6 +183,48 @@ fn panicking_new_cyclic2() {
 
     let _cc = Cc::new_cyclic(|weak| {
         let _weak = weak.clone();
-        panic!("Expected panic during new_cyclic!");
+        panic!("Expected panic during panicking_new_cyclic2!");
+    });
+}
+
+#[test]
+fn panicking_saving_new_cyclic() {
+    reset_state();
+
+    thread_local! {
+        static SAVED: RefCell<Option<Weak<Cyclic>>> = RefCell::new(None);
+    }
+
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {}
+
+    assert!(catch_unwind(|| {
+        let _cc = Cc::new_cyclic(|weak| {
+            SAVED.with(|saved| {
+                *saved.borrow_mut() = Some(weak.clone());
+            });
+            panic!();
+        });
+    }).is_err());
+
+    SAVED.with(|saved| {
+        let weak = &*saved.borrow();
+        assert!(weak.is_some());
+        let weak = weak.as_ref().unwrap();
+        assert!(weak.upgrade().is_none());
+        assert_eq!(1, weak.weak_count());
+        assert_eq!(0, weak.strong_count());
+        let _weak = weak.clone();
+        assert_eq!(2, weak.weak_count());
+        assert_eq!(0, weak.strong_count());
     });
 }

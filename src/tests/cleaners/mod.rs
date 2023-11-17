@@ -21,19 +21,19 @@ fn clean_after_drop() {
         cleaner: Cleaner::new(),
     });
 
-    let already_cleaned = Rc::new(Cell::new(false));
+    let already_cleaned = Rc::new(Cell::new(CleanableState::new()));
 
     let cleaner = register_cleaner(&already_cleaned, &to_clean.cleaner);
 
-    assert!(!already_cleaned.get());
+    already_cleaned.get().assert_not_cleaned();
 
     drop(to_clean); // Should call the clean function
 
-    assert!(already_cleaned.get());
+    already_cleaned.get().assert_cleaned();
 
     cleaner.clean(); // This should be a no-op
 
-    assert!(already_cleaned.get());
+    already_cleaned.get().assert_cleaned();
 }
 
 #[test]
@@ -54,28 +54,56 @@ fn clean_before_drop() {
         cleaner: Cleaner::new(),
     });
 
-    let already_cleaned = Rc::new(Cell::new(false));
+    let already_cleaned = Rc::new(Cell::new(CleanableState::new()));
 
     let cleaner = register_cleaner(&already_cleaned, &to_clean.cleaner);
 
-    assert!(!already_cleaned.get());
+    already_cleaned.get().assert_not_cleaned();
 
     cleaner.clean(); // Clean immediately after
 
-    assert!(already_cleaned.get());
+    already_cleaned.get().assert_cleaned();
 
     drop(to_clean); // Should call the clean function
 
-    assert!(already_cleaned.get());
+    already_cleaned.get().assert_cleaned();
 }
 
-fn register_cleaner(already_cleaned: &Rc<Cell<bool>>, cleaner: &Cleaner) -> Cleanable {
+#[derive(Copy, Clone, Default, Debug)]
+struct CleanableState {
+    cleaned: bool,
+    cleaned_twice: bool,
+}
+
+impl CleanableState {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn assert_cleaned(self) {
+        assert!(self.cleaned);
+        assert!(!self.cleaned_twice);
+    }
+
+    fn assert_not_cleaned(self) {
+        assert!(!self.cleaned);
+        assert!(!self.cleaned_twice);
+    }
+}
+
+fn register_cleaner(already_cleaned: &Rc<Cell<CleanableState>>, cleaner: &Cleaner) -> Cleanable {
     assert!(!cleaner.has_allocated());
 
     let already_cleaned = already_cleaned.clone();
     let cleanable = cleaner.register(move || {
-        assert!(!already_cleaned.get(), "Already cleaned!");
-        already_cleaned.set(true);
+        let mut old = already_cleaned.get();
+        if old.cleaned {
+            // Already cleaned
+            old.cleaned_twice = true;
+        } else {
+            old.cleaned = true;
+        }
+        already_cleaned.set(old);
     });
 
     assert!(cleaner.has_allocated());
@@ -128,6 +156,69 @@ fn clean_with_cyclic_cc() {
     assert!(!already_cleaned.get());
 
     cleaner.clean();
+
+    assert!(already_cleaned.get());
+}
+
+#[test]
+fn simple_panic_on_clean() {
+    let cleaner = Cleaner::new();
+
+    let already_cleaned = Rc::new(Cell::new(false));
+
+    let already_cleaned_clone = already_cleaned.clone();
+    cleaner.register(move || {
+        already_cleaned_clone.set(true);
+        panic!("Panic inside registered cleaner!");
+    }).clean();
+
+    assert!(already_cleaned.get());
+}
+
+#[test]
+fn simple_panic_on_cleaner_drop() {
+    let cleaner = Cleaner::new();
+
+    let already_cleaned = Rc::new(Cell::new(false));
+
+    let already_cleaned_clone = already_cleaned.clone();
+    cleaner.register(move || {
+        already_cleaned_clone.set(true);
+        panic!("Panic inside registered cleaner!");
+    });
+
+    drop(cleaner);
+
+    assert!(already_cleaned.get());
+}
+
+#[test]
+fn panic_on_clean() {
+    struct ToClean {
+        cleaner: Cleaner,
+    }
+
+    unsafe impl Trace for ToClean {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cleaner.trace(ctx);
+        }
+    }
+
+    impl Finalize for ToClean {}
+
+    let to_clean = Cc::new(ToClean {
+        cleaner: Cleaner::new(),
+    });
+
+    let already_cleaned = Rc::new(Cell::new(false));
+
+    let already_cleaned_clone = already_cleaned.clone();
+    to_clean.cleaner.register(move || {
+        already_cleaned_clone.set(true);
+        panic!("Panic inside registered cleaner!");
+    });
+
+    drop(to_clean);
 
     assert!(already_cleaned.get());
 }
