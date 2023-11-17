@@ -1,14 +1,13 @@
-use std::cell::{BorrowMutError, RefCell};
-use std::ops::DerefMut;
-use std::thread::AccessError;
+use core::cell::RefCell;
 
 use thiserror::Error;
 
 use crate::state::State;
+use crate::utils;
 
 const DEFAULT_BYTES_THRESHOLD: usize = 100;
 
-thread_local! {
+utils::rust_cc_thread_local! {
     pub(crate) static CONFIG: RefCell<Config> = const { RefCell::new(Config::new()) };
 }
 
@@ -16,16 +15,21 @@ pub fn config<F, R>(f: F) -> Result<R, ConfigAccessError>
 where
     F: FnOnce(&mut Config) -> R,
 {
-    CONFIG.try_with(|config| Ok(f(config.try_borrow_mut()?.deref_mut())))?
+    CONFIG.try_with(|config| {
+        config
+        .try_borrow_mut()
+        .or(Err(ConfigAccessError::BorrowMutError))
+        .map(|mut config| f(&mut config))
+    }).unwrap_or(Err(ConfigAccessError::AccessError))
 }
 
 #[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum ConfigAccessError {
-    #[error(transparent)]
-    AccessError(#[from] AccessError),
-    #[error(transparent)]
-    BorrowMutError(#[from] BorrowMutError),
+    #[error("couldn't access the configuration")]
+    AccessError,
+    #[error("couldn't borrow the configuration mutably")]
+    BorrowMutError,
 }
 
 #[derive(Debug, Clone)]

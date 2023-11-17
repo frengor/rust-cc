@@ -16,9 +16,13 @@ jobs:
           components: clippy
       - uses: taiki-e/install-action@cargo-hack
       - name: Check and Clippy
+        # Keep "std" feature always enabled on stable to avoid needing the no-std related nightly features
+        # Also don't use --workspace (but run two commands) since rust-cc-derive hasn't a "std" feature
         run: |
-          cargo hack check --feature-powerset --skip nightly --clean-per-run --verbose --workspace
-          cargo hack clippy --feature-powerset --skip nightly --clean-per-run --verbose --workspace -- -D warnings
+          cargo hack check --all-targets --feature-powerset --skip nightly --clean-per-run --verbose -F std
+          cargo hack check --all-targets --feature-powerset --skip nightly --clean-per-run --verbose --manifest-path derive/Cargo.toml
+          cargo hack clippy --all-targets --feature-powerset --skip nightly --clean-per-run --verbose -F std -- -D warnings
+          cargo hack clippy --all-targets --feature-powerset --skip nightly --clean-per-run --verbose --manifest-path derive/Cargo.toml -- -D warnings
   on-nightly:
     runs-on: ubuntu-latest
     steps:
@@ -30,5 +34,5 @@ jobs:
       - name: Check and Clippy (nightly)
         # No need to use --workspace here, since there's no nightly feature in rust-cc-derive
         run: |
-          cargo hack check --feature-powerset --clean-per-run --verbose -F nightly
-          cargo hack clippy --feature-powerset --clean-per-run --verbose -F nightly -- -D warnings
+          cargo hack check --all-targets --feature-powerset --clean-per-run --verbose -F nightly
+          cargo hack clippy --all-targets --feature-powerset --clean-per-run --verbose -F nightly -- -D warnings

@@ -1,8 +1,8 @@
 #![cfg(test)]
 
+use std::rc::Rc;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use crate::trace::Trace;
 use crate::{state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
@@ -36,14 +36,14 @@ pub(crate) fn reset_state() {
 pub(crate) struct Droppable<T: Trace> {
     inner: T,
     #[allow(unused)]
-    finalize: Arc<Cell<bool>>,
-    drop: Arc<Cell<bool>>,
+    finalize: Rc<Cell<bool>>,
+    drop: Rc<Cell<bool>>,
 }
 
 impl<T: Trace> Droppable<T> {
     pub(crate) fn new(t: T) -> (Droppable<T>, DropChecker) {
-        let finalize = Arc::new(Cell::new(false));
-        let drop = Arc::new(Cell::new(false));
+        let finalize = Rc::new(Cell::new(false));
+        let drop = Rc::new(Cell::new(false));
         (
             Droppable {
                 inner: t,
@@ -100,8 +100,8 @@ impl<T: Trace> Drop for Droppable<T> {
 
 pub(crate) struct DropChecker {
     #[allow(unused)]
-    finalize: Arc<Cell<bool>>,
-    drop: Arc<Cell<bool>>,
+    finalize: Rc<Cell<bool>>,
+    drop: Rc<Cell<bool>>,
 }
 
 impl DropChecker {

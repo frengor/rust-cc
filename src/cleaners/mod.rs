@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use alloc::boxed::Box;
+use core::cell::RefCell;
 
 use slotmap::{new_key_type, SlotMap};
 
@@ -65,8 +66,7 @@ impl Cleaner {
         }
     }
 
-    // For tests
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     pub(crate) fn has_allocated(&self) -> bool {
         self.cleaner_map.map.borrow().is_some()
     }

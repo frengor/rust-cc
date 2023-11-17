@@ -1,12 +1,12 @@
-use std::alloc::Layout;
-use std::cell::UnsafeCell;
-use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
-use std::ops::Deref;
-use std::ptr::{self, drop_in_place, NonNull};
-use std::rc::Rc;
+use alloc::alloc::Layout;
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::mem::{self, MaybeUninit};
+use core::ops::Deref;
+use core::ptr::{self, drop_in_place, NonNull};
+use alloc::rc::Rc;
 #[cfg(feature = "nightly")]
-use std::{
+use core::{
     marker::Unsize,
     ops::CoerceUnsized,
     ptr::{metadata, DynMetadata},
@@ -409,7 +409,7 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline(always)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
         state(|state| CcOnHeap::new(t, state))
