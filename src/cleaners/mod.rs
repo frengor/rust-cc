@@ -27,7 +27,20 @@ struct CleanerFn(Option<Box<dyn FnOnce() + 'static>>);
 impl Drop for CleanerFn {
     fn drop(&mut self) {
         if let Some(fun) = self.0.take() {
-            fun();
+            // Catch unwind only on std since catch_unwind isn't present in core
+            #[cfg(feature = "std")]
+            {
+                use std::panic::{AssertUnwindSafe, catch_unwind};
+
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    fun();
+                }));
+            }
+
+            #[cfg(not(feature = "std"))]
+            {
+                fun();
+            }
         }
     }
 }
