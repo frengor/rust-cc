@@ -333,7 +333,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
                     // SAFETY: we're the only one to have a pointer to this allocation
                     unsafe {
-                        drop_in_place(self.inner().elem.get());
+                        drop_in_place(self.inner().get_elem_mut());
                         cc_dealloc(self.inner, layout, state);
                     }
                     // _dropping_guard is dropped here, resetting state.dropping
