@@ -3,6 +3,9 @@ use std::rc::Rc;
 use crate::{Cc, collect_cycles, Context, Finalize, Trace};
 use crate::cleaners::{Cleanable, Cleaner};
 
+#[cfg(not(miri))] // Used by tests run only when not on miri
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 #[test]
 fn clean_after_drop() {
     struct ToClean {
@@ -21,19 +24,19 @@ fn clean_after_drop() {
         cleaner: Cleaner::new(),
     });
 
-    let already_cleaned = Rc::new(Cell::new(CleanableState::new()));
+    let already_cleaned = Rc::new(Cell::new(false));
 
     let cleaner = register_cleaner(&already_cleaned, &to_clean.cleaner);
 
-    already_cleaned.get().assert_not_cleaned();
+    assert!(!already_cleaned.get());
 
     drop(to_clean); // Should call the clean function
 
-    already_cleaned.get().assert_cleaned();
+    assert!(already_cleaned.get());
 
     cleaner.clean(); // This should be a no-op
 
-    already_cleaned.get().assert_cleaned();
+    assert!(already_cleaned.get());
 }
 
 #[test]
@@ -54,56 +57,28 @@ fn clean_before_drop() {
         cleaner: Cleaner::new(),
     });
 
-    let already_cleaned = Rc::new(Cell::new(CleanableState::new()));
+    let already_cleaned = Rc::new(Cell::new(false));
 
     let cleaner = register_cleaner(&already_cleaned, &to_clean.cleaner);
 
-    already_cleaned.get().assert_not_cleaned();
+    assert!(!already_cleaned.get());
 
     cleaner.clean(); // Clean immediately after
 
-    already_cleaned.get().assert_cleaned();
+    assert!(already_cleaned.get());
 
     drop(to_clean); // Should call the clean function
 
-    already_cleaned.get().assert_cleaned();
+    assert!(already_cleaned.get());
 }
 
-#[derive(Copy, Clone, Default, Debug)]
-struct CleanableState {
-    cleaned: bool,
-    cleaned_twice: bool,
-}
-
-impl CleanableState {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn assert_cleaned(self) {
-        assert!(self.cleaned);
-        assert!(!self.cleaned_twice);
-    }
-
-    fn assert_not_cleaned(self) {
-        assert!(!self.cleaned);
-        assert!(!self.cleaned_twice);
-    }
-}
-
-fn register_cleaner(already_cleaned: &Rc<Cell<CleanableState>>, cleaner: &Cleaner) -> Cleanable {
+fn register_cleaner(already_cleaned: &Rc<Cell<bool>>, cleaner: &Cleaner) -> Cleanable {
     assert!(!cleaner.has_allocated());
 
     let already_cleaned = already_cleaned.clone();
     let cleanable = cleaner.register(move || {
-        let mut old = already_cleaned.get();
-        if old.cleaned {
-            // Already cleaned
-            old.cleaned_twice = true;
-        } else {
-            old.cleaned = true;
-        }
-        already_cleaned.set(old);
+        assert!(!already_cleaned.get(), "Already cleaned!");
+        already_cleaned.set(true);
     });
 
     assert!(cleaner.has_allocated());
@@ -160,6 +135,7 @@ fn clean_with_cyclic_cc() {
     assert!(already_cleaned.get());
 }
 
+#[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn simple_panic_on_clean() {
     let cleaner = Cleaner::new();
@@ -167,14 +143,19 @@ fn simple_panic_on_clean() {
     let already_cleaned = Rc::new(Cell::new(false));
 
     let already_cleaned_clone = already_cleaned.clone();
-    cleaner.register(move || {
+    let cleanable = cleaner.register(move || {
         already_cleaned_clone.set(true);
         panic!("Panic inside registered cleaner!");
-    }).clean();
+    });
+
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        cleanable.clean();
+    })).is_err());
 
     assert!(already_cleaned.get());
 }
 
+#[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn simple_panic_on_cleaner_drop() {
     let cleaner = Cleaner::new();
@@ -187,11 +168,14 @@ fn simple_panic_on_cleaner_drop() {
         panic!("Panic inside registered cleaner!");
     });
 
-    drop(cleaner);
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        drop(cleaner);
+    })).is_err());
 
     assert!(already_cleaned.get());
 }
 
+#[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn panic_on_clean() {
     struct ToClean {
@@ -218,7 +202,9 @@ fn panic_on_clean() {
         panic!("Panic inside registered cleaner!");
     });
 
-    drop(to_clean);
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        drop(to_clean);
+    })).is_err());
 
     assert!(already_cleaned.get());
 }
