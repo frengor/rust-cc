@@ -1,7 +1,8 @@
+use std::cell::Cell;
 use std::ops::Deref;
 use std::panic::catch_unwind;
 use crate::*;
-use crate::state::reset_state;
+use super::reset_state;
 use crate::weak::{Weak, Weakable, WeakableCc};
 
 #[test]
@@ -227,4 +228,123 @@ fn panicking_saving_new_cyclic() {
         assert_eq!(2, weak.weak_count());
         assert_eq!(0, weak.strong_count());
     });
+}
+
+#[test]
+fn try_upgrade_in_finalize_and_drop() {
+    reset_state();
+
+    thread_local! {
+        static TRACED: Cell<bool> = Cell::new(false);
+        static FINALIZED: Cell<bool> = Cell::new(false);
+        static DROPPED: Cell<bool> = Cell::new(false);
+    }
+
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            TRACED.with(|traced| traced.set(true));
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            FINALIZED.with(|finalized| finalized.set(true));
+            assert!(self.weak.upgrade().is_none());
+        }
+    }
+
+    impl Drop for Cyclic {
+        fn drop(&mut self) {
+            DROPPED.with(|dropped| dropped.set(true));
+            assert!(self.weak.upgrade().is_none());
+        }
+    }
+
+    let weak = {
+        let cc = Cc::new_cyclic(|weak| Cyclic {
+            weak: weak.clone(),
+        });
+        assert_eq!(1, cc.strong_count());
+        cc.downgrade()
+        // cc is dropped and collected automatically
+    };
+
+    assert!(weak.upgrade().is_none());
+    assert_eq!(0, weak.strong_count());
+    assert_eq!(1, weak.weak_count());
+
+    // Shouldn't have traced
+    assert!(!TRACED.with(|traced| traced.get()));
+    if cfg!(feature = "finalization") {
+        assert!(FINALIZED.with(|finalized| finalized.get()));
+    }
+    assert!(DROPPED.with(|dropped| dropped.get()));
+}
+
+#[test]
+fn try_upgrade_in_cyclic_finalize_and_drop() {
+    reset_state();
+
+    thread_local! {
+        static TRACED: Cell<bool> = Cell::new(false);
+        static FINALIZED: Cell<bool> = Cell::new(false);
+        static DROPPED: Cell<bool> = Cell::new(false);
+    }
+
+    struct Cyclic {
+        cyclic: RefCell<Option<WeakableCc<Cyclic>>>,
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            TRACED.with(|traced| traced.set(true));
+            self.cyclic.trace(ctx);
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            FINALIZED.with(|finalized| finalized.set(true));
+            assert!(self.weak.upgrade().is_some()); // In cyclic the strong_count is > 0, so the weak can be upgraded
+        }
+    }
+
+    impl Drop for Cyclic {
+        fn drop(&mut self) {
+            DROPPED.with(|dropped| dropped.set(true));
+            assert!(self.weak.upgrade().is_none());
+        }
+    }
+
+    let weak: Weak<Cyclic> = {
+        let cc: Cc<Weakable<Cyclic>> = WeakableCc::new_cyclic(|weak| Cyclic {
+            cyclic: RefCell::new(None),
+            weak: weak.clone(),
+        });
+        *cc.cyclic.borrow_mut() = Some(cc.clone());
+        assert_eq!(2, cc.strong_count());
+        cc.downgrade()
+    };
+
+    assert_eq!(1, weak.strong_count());
+    assert_eq!(2, weak.weak_count());
+
+    collect_cycles();
+
+    assert!(weak.upgrade().is_none());
+    assert_eq!(0, weak.strong_count());
+    assert_eq!(1, weak.weak_count());
+
+    assert!(TRACED.with(|traced| traced.get()));
+    if cfg!(feature = "finalization") {
+        assert!(FINALIZED.with(|finalized| finalized.get()));
+    }
+    assert!(DROPPED.with(|dropped| dropped.get()));
 }

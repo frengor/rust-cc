@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use crate::{Cc, collect_cycles, Context, Finalize, Trace};
+use super::reset_state;
 use crate::cleaners::{Cleanable, Cleaner};
 
 #[cfg(not(miri))] // Used by tests run only when not on miri
@@ -8,6 +9,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 #[test]
 fn clean_after_drop() {
+    reset_state();
+
     struct ToClean {
         cleaner: Cleaner,
     }
@@ -41,6 +44,8 @@ fn clean_after_drop() {
 
 #[test]
 fn clean_before_drop() {
+    reset_state();
+
     struct ToClean {
         cleaner: Cleaner,
     }
@@ -88,6 +93,8 @@ fn register_cleaner(already_cleaned: &Rc<Cell<bool>>, cleaner: &Cleaner) -> Clea
 
 #[test]
 fn clean_with_cyclic_cc() {
+    reset_state();
+
     struct ToClean {
         cleaner: Cleaner,
     }
@@ -138,6 +145,8 @@ fn clean_with_cyclic_cc() {
 #[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn simple_panic_on_clean() {
+    reset_state();
+
     let cleaner = Cleaner::new();
 
     let already_cleaned = Rc::new(Cell::new(false));
@@ -158,6 +167,8 @@ fn simple_panic_on_clean() {
 #[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn simple_panic_on_cleaner_drop() {
+    reset_state();
+
     let cleaner = Cleaner::new();
 
     let already_cleaned = Rc::new(Cell::new(false));
@@ -178,6 +189,8 @@ fn simple_panic_on_cleaner_drop() {
 #[cfg(not(miri))] // Don't run on Miri due to leaks
 #[test]
 fn panic_on_clean() {
+    reset_state();
+
     struct ToClean {
         cleaner: Cleaner,
     }
