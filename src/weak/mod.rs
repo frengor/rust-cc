@@ -194,7 +194,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
             panic!("Cannot create a new Cc while tracing!");
         }
 
-        let invalid_cc = Cc::new(Weakable::new(MaybeUninit::uninit()));
+        let invalid_cc = Cc::new(Weakable::new(NewCyclicWrapper::new()));
         let metadata: NonNull<WeakMetadata> = invalid_cc.init_get_metadata();
 
         // Set weak counter to 1
@@ -224,14 +224,14 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
 
         // Panic guard to deallocate the metadata and the CcOnHeap if the provided function f panics
         struct PanicGuard<T: Trace + 'static> {
-            invalid: NonNull<CcOnHeap<Weakable<MaybeUninit<T>>>>,
+            invalid: NonNull<CcOnHeap<Weakable<NewCyclicWrapper<T>>>>,
         }
 
         impl<T: Trace + 'static> Drop for PanicGuard<T> {
             fn drop(&mut self) {
                 unsafe {
-                    // Drop only the Weakable
-                    drop_in_place::<Weakable<MaybeUninit<T>>>(self.invalid.as_ref().get_elem_mut());
+                    // Drop only the metadata allocation
+                    (*self.invalid.as_ref().get_elem_mut()).drop_metadata();
                     // Deallocate the CcOnHeap
                     state(|state| {
                         let layout = self.invalid.as_ref().layout();
@@ -245,7 +245,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
 
         unsafe {
             // Write the newly created T
-            invalid.as_ref().get_elem_mut().as_mut().unwrap_unchecked().elem.write(f(&weak));
+            (*invalid.as_ref().get_elem_mut()).elem.inner.write(f(&weak));
         }
 
         // panic_guard is no longer needed
@@ -301,6 +301,22 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
     }
 }
 
+impl<T: ?Sized + Trace + 'static> Weakable<T> {
+    fn drop_metadata(&mut self) {
+        if let Some(metadata) = self.metadata.get() {
+            unsafe {
+                if metadata.as_ref().counter() == 0 {
+                    // There are no weak pointers, deallocate the metadata
+                    dealloc_other(metadata);
+                } else {
+                    // There exist weak pointers, set the CcOnHeap allocation not accessible
+                    metadata.as_ref().set_accessible(false);
+                }
+            }
+        }
+    }
+}
+
 impl<T: ?Sized + Trace + 'static> Deref for Weakable<T> {
     type Target = T;
 
@@ -313,17 +329,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Weakable<T> {
 impl<T: ?Sized + Trace + 'static> Drop for Weakable<T> {
     #[inline]
     fn drop(&mut self) {
-        if let Some(metadata) = self.metadata.get() {
-            unsafe {
-                if metadata.as_ref().counter() == 0 {
-                    // There are no weak pointers, deallocate the metadata
-                    dealloc_other(metadata);
-                } else {
-                    // There exist weak pointers, set the CcOnHeap allocation not accessible
-                    metadata.as_ref().set_accessible(false);
-                }
-            }
-        }
+        self.drop_metadata();
     }
 }
 
@@ -339,5 +345,47 @@ impl<T: ?Sized + Trace + 'static> Finalize for Weakable<T> {
     fn finalize(&self) {
         // Weakable is intended to be a transparent wrapper, so just call finalize on elem
         self.elem.finalize();
+    }
+}
+
+#[repr(transparent)]
+struct NewCyclicWrapper<T: Trace + 'static> {
+    inner: MaybeUninit<T>,
+}
+
+impl<T: Trace + 'static> NewCyclicWrapper<T> {
+    fn new() -> NewCyclicWrapper<T> {
+        NewCyclicWrapper {
+            inner: MaybeUninit::uninit(),
+        }
+    }
+}
+
+unsafe impl<T: Trace + 'static> Trace for NewCyclicWrapper<T> {
+    fn trace(&self, ctx: &mut Context<'_>) {
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
+        unsafe {
+            self.inner.assume_init_ref().trace(ctx);
+        }
+    }
+}
+
+impl<T: Trace + 'static> Finalize for NewCyclicWrapper<T> {
+    fn finalize(&self) {
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
+        unsafe {
+            self.inner.assume_init_ref().finalize();
+        }
+    }
+}
+
+impl<T: Trace + 'static> Drop for NewCyclicWrapper<T> {
+    fn drop(&mut self) {
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
+        //         Also, using the "read" version is fine since we need to
+        unsafe {
+            let ptr = self.inner.assume_init_mut() as *mut T;
+            drop_in_place(ptr);
+        }
     }
 }
