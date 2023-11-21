@@ -5,6 +5,8 @@ on: [push, pull_request]
 env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
   on-stable:
@@ -38,8 +40,6 @@ jobs:
           cargo hack clippy --all-targets --feature-powerset --clean-per-run --verbose -F nightly -- -D warnings
   docs:
     runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
