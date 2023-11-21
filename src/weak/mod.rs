@@ -179,6 +179,7 @@ impl<T: ?Sized + Trace + 'static> Weakable<T> {
 impl<T: Trace + 'static> Cc<Weakable<T>> {
     #[inline(always)]
     #[must_use = "newly created Cc is immediately dropped"]
+    #[track_caller]
     pub fn new_weakable(t: T) -> Self {
         Cc::new(Weakable::new(t))
     }
