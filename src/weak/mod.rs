@@ -10,7 +10,7 @@ use core::cell::Cell;
 use core::mem::MaybeUninit;
 
 use crate::cc::CcOnHeap;
-use crate::state::state;
+use crate::state::{state, try_state};
 use crate::{Cc, Context, Finalize, Trace};
 use crate::utils::{alloc_other, cc_dealloc, dealloc_other};
 use crate::weak::weak_metadata::WeakMetadata;
@@ -194,15 +194,22 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
             panic!("Cannot create a new Cc while tracing!");
         }
 
-        let invalid_cc = Cc::new(Weakable::new(NewCyclicWrapper::new()));
-        let metadata: NonNull<WeakMetadata> = invalid_cc.init_get_metadata();
+        let cc = Cc::new(Weakable::new(NewCyclicWrapper::new()));
+
+        // Immediately call inner_ptr and forget the Cc instance. Having a Cc instance is dangerous, since:
+        // 1. The strong count will become 0
+        // 2. The Cc::drop implementation might be accidentally called during an unwinding
+        let invalid_cc: NonNull<CcOnHeap<_>> = cc.inner_ptr();
+        mem::forget(cc);
+
+        let metadata: NonNull<WeakMetadata> = unsafe { invalid_cc.as_ref() }.get_elem().init_get_metadata();
 
         // Set weak counter to 1
         // This is done after creating the Cc to make sure that if Cc::new panics the metadata allocation isn't leaked
         let _ = unsafe { metadata.as_ref() }.increment_counter();
 
         {
-            let counter_marker = invalid_cc.inner().counter_marker();
+            let counter_marker = unsafe { invalid_cc.as_ref() }.counter_marker();
 
             // The correctness of the decrement_counter() call depends on this, which should be always true
             debug_assert_eq!(1, counter_marker.counter());
@@ -211,52 +218,46 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
             let _ = counter_marker.decrement_counter();
         }
 
-        // Get rid of invalid_cc. Having a Cc instance is dangerous, since:
-        // 1. The strong count is now 0
-        // 2. The Cc::drop implementation might be accidentally called during an unwinding
-        let invalid = invalid_cc.inner_ptr();
-        mem::forget(invalid_cc); // Don't execute invalid_cc's drop
-
         let weak: Weak<T> = Weak {
             metadata,
-            cc: invalid.cast(),
+            cc: invalid_cc.cast(), // This cast is correct since NewCyclicWrapper is repr(transparent) and contains a MaybeUninit<T>
         };
 
         // Panic guard to deallocate the metadata and the CcOnHeap if the provided function f panics
         struct PanicGuard<T: Trace + 'static> {
-            invalid: NonNull<CcOnHeap<Weakable<NewCyclicWrapper<T>>>>,
+            invalid_cc: NonNull<CcOnHeap<Weakable<NewCyclicWrapper<T>>>>,
         }
 
         impl<T: Trace + 'static> Drop for PanicGuard<T> {
             fn drop(&mut self) {
                 unsafe {
-                    // Drop only the metadata allocation
-                    (*self.invalid.as_ref().get_elem_mut()).drop_metadata();
-                    // Deallocate the CcOnHeap
-                    state(|state| {
-                        let layout = self.invalid.as_ref().layout();
-                        cc_dealloc(self.invalid, layout, state);
+                    // Deallocate only the metadata allocation
+                    (*self.invalid_cc.as_ref().get_elem_mut()).drop_metadata();
+                    // Deallocate the CcOnHeap. Use try_state to avoiding panicking inside a Drop
+                    let _ = try_state(|state| {
+                        let layout = self.invalid_cc.as_ref().layout();
+                        cc_dealloc(self.invalid_cc, layout, state);
                     });
                 }
             }
         }
 
-        let panic_guard = PanicGuard { invalid };
+        let panic_guard = PanicGuard { invalid_cc };
+        let to_write = f(&weak);
+        mem::forget(panic_guard); // Panic guard is no longer useful
 
         unsafe {
             // Write the newly created T
-            (*invalid.as_ref().get_elem_mut()).elem.inner.write(f(&weak));
+            (*invalid_cc.as_ref().get_elem_mut()).elem.inner.write(to_write);
         }
-
-        // panic_guard is no longer needed
-        mem::forget(panic_guard);
 
         // Set strong count to 1
         // This cannot fail since upgrade() cannot be called
-        let _ = unsafe { invalid.as_ref() }.counter_marker().increment_counter();
+        let _ = unsafe { invalid_cc.as_ref() }.counter_marker().increment_counter();
 
         // Create the Cc again since it is now valid
-        let cc: Cc<Weakable<T>> = Cc::__new_internal(invalid.cast());
+        // Casting invalid_cc is correct since NewCyclicWrapper is repr(transparent) and contains a MaybeUninit<T>
+        let cc: Cc<Weakable<T>> = Cc::__new_internal(invalid_cc.cast());
 
         debug_assert_eq!(1, cc.inner().counter_marker().counter());
 
@@ -348,6 +349,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for Weakable<T> {
     }
 }
 
+/// A **transparent** wrapper used to implement [`Cc::new_cyclic`].
 #[repr(transparent)]
 struct NewCyclicWrapper<T: Trace + 'static> {
     inner: MaybeUninit<T>,
@@ -363,7 +365,7 @@ impl<T: Trace + 'static> NewCyclicWrapper<T> {
 
 unsafe impl<T: Trace + 'static> Trace for NewCyclicWrapper<T> {
     fn trace(&self, ctx: &mut Context<'_>) {
-        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
             self.inner.assume_init_ref().trace(ctx);
         }
@@ -372,7 +374,7 @@ unsafe impl<T: Trace + 'static> Trace for NewCyclicWrapper<T> {
 
 impl<T: Trace + 'static> Finalize for NewCyclicWrapper<T> {
     fn finalize(&self) {
-        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
             self.inner.assume_init_ref().finalize();
         }
@@ -381,8 +383,7 @@ impl<T: Trace + 'static> Finalize for NewCyclicWrapper<T> {
 
 impl<T: Trace + 'static> Drop for NewCyclicWrapper<T> {
     fn drop(&mut self) {
-        // SAFETY: NewCyclicWrapper is used only in new_cyclic and the Cc cannot be traced until the contents are initialized
-        //         Also, using the "read" version is fine since we need to
+        // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
             let ptr = self.inner.assume_init_mut() as *mut T;
             drop_in_place(ptr);
