@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use core::ffi::CStr;
 use core::marker::PhantomData;
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::ManuallyDrop;
 use core::num::{
     NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU128,
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
@@ -287,7 +287,9 @@ empty_trace! {
     OsString,
 }
 
-unsafe impl<T> Trace for MaybeUninit<T> {
+// Removed since these impls are error-prone. Making a Cc<MaybeUninit<T>> and then casting it to Cc<T>
+// doesn't make T traced during tracing, since the impls for MaybeUninit are empty and the vtable is saved when calling Cc::new
+/*unsafe impl<T> Trace for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {}
@@ -297,7 +299,7 @@ impl<T> Finalize for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
     fn finalize(&self) {}
-}
+}*/
 
 unsafe impl<T> Trace for PhantomData<T> {
     #[inline(always)]

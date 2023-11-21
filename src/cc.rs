@@ -1,7 +1,7 @@
 use alloc::alloc::Layout;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
-use core::mem::{self, MaybeUninit};
+use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, drop_in_place, NonNull};
 use alloc::rc::Rc;
@@ -114,73 +114,6 @@ impl<T: Trace + 'static> Cc<T> {
             mem::forget(self); // Don't call drop on this Cc
             t
         }
-    }
-}
-
-impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
-    /// Assumes that this [`Cc`] has been initialized.
-    ///
-    /// # Safety
-    /// See [`MaybeUninit::assume_init`].
-    ///
-    /// # Panics
-    /// This function panics if called while tracing.
-    ///
-    /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
-    /// [`is_unique`]: fn@Cc::is_unique
-    #[inline]
-    #[track_caller]
-    pub unsafe fn assume_init(self) -> Cc<T> {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot initialize a Cc while tracing!");
-        }
-
-        self.mark_alive();
-
-        // The counter should not be updated since we're taking self
-        let cc = Cc {
-            inner: self.inner.cast(), // Safe since we're requiring that it is initialized
-            _phantom: PhantomData,
-        };
-
-        mem::forget(self); // Don't call drop on this Cc
-        cc
-    }
-
-    /// Initialize this [`Cc`] with the provided value and returns the initialized [`Cc<T>`].
-    ///
-    /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
-    ///
-    /// # Panics
-    /// This function panics if this [`Cc`] is not unique (see [`is_unique`]) or if it's called while tracing.
-    ///
-    /// [`Cc<T>`]: struct@Cc
-    /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
-    /// [`is_unique`]: fn@Cc::is_unique
-    #[inline]
-    #[track_caller]
-    pub fn init(mut self, value: T) -> Cc<T> {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot initialize a Cc while tracing!");
-        }
-
-        // This prevents race conditions
-        assert!(self.is_unique(), "Cc is not unique");
-
-        self.mark_alive();
-
-        unsafe {
-            self.inner.as_mut().elem.get_mut().write(value);
-        }
-
-        // The counter should not be updated since we're taking self
-        let cc = Cc {
-            inner: self.inner.cast(), // Safe since we've just initialized it
-            _phantom: PhantomData,
-        };
-
-        mem::forget(self); // Don't call drop on this Cc
-        cc
     }
 }
 

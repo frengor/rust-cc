@@ -1,5 +1,3 @@
-use std::mem::MaybeUninit;
-
 use super::*;
 use crate::*;
 
@@ -351,25 +349,6 @@ fn test_self_loop_finalization_aliasing() {
     }
 
     collect_cycles();
-}
-
-#[test]
-fn test_assume_init() {
-    reset_state();
-
-    let cc = Cc::new(MaybeUninit::<u32>::new(42));
-    // SAFETY: cc is already initialized
-    let cc = unsafe { cc.assume_init() };
-    assert_eq!(*cc, 42);
-}
-
-#[test]
-fn test_init() {
-    reset_state();
-
-    let cc = Cc::new(MaybeUninit::<u32>::uninit());
-    let cc = cc.init(42);
-    assert_eq!(*cc, 42);
 }
 
 #[test]
