@@ -53,38 +53,6 @@ impl<T: Trace + 'static> Cc<T> {
         })
     }
 
-    /*#[must_use = "newly created Cc is immediately dropped"]
-    #[track_caller]
-    pub fn new_cyclic<F>(f: F) -> Cc<T>
-    where
-        F: FnOnce(&Cc<T>) -> T,
-    {
-        #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot create a new Cc while tracing!");
-        }
-
-        #[cfg(feature = "auto-collect")]
-        super::trigger_collection();
-
-        let mut invalid: NonNull<CcOnHeap<MaybeUninit<T>>> = CcOnHeap::<T>::new_invalid();
-        let cc = Cc {
-            inner: invalid.cast(),
-            _phantom: PhantomData,
-        };
-
-        unsafe {
-            // Write the newly created T
-            invalid.as_mut().elem.get_mut().write(f(&cc));
-        }
-
-        // Set valid
-        cc.counter_marker().mark(Mark::NonMarked);
-
-        // Return cc, since it is now valid
-        cc
-    }*/
-
     /// Takes out the value inside this [`Cc`].
     ///
     /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
