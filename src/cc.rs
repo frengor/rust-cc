@@ -109,7 +109,7 @@ impl<T: Trace + 'static> Cc<T> {
         // SAFETY: self is unique and is not inside any list
         unsafe {
             let t = ptr::read(self.inner().get_elem());
-            let layout = self.inner().layout();
+            let layout = Layout::for_value(self.inner());
             let _ = try_state(|state| cc_dealloc(self.inner, layout, state));
             mem::forget(self); // Don't call drop on this Cc
             t
@@ -329,7 +329,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
                 if to_drop {
                     let _dropping_guard = replace_state_field!(dropping, true, state);
-                    let layout = self.inner().layout();
+                    let layout = Layout::for_value(self.inner());
 
                     // SAFETY: we're the only one to have a pointer to this allocation
                     unsafe {
@@ -341,16 +341,19 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
             });
         } else {
             // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
-            add_to_list(self.inner.cast());
+            add_to_list(self.inner);
         }
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
+unsafe impl<
+    #[cfg(feature = "nightly")] T: ?Sized + Trace + Unsize<dyn Trace> + 'static,
+    #[cfg(not(feature = "nightly"))] T: Trace + 'static,
+> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if CcOnHeap::trace(self.inner.cast(), ctx) {
+        if CcOnHeap::should_trace(self.inner, ctx) {
             self.inner().get_elem().trace(ctx);
         }
     }
@@ -360,14 +363,8 @@ impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
 
 #[repr(C)]
 pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
-    next: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
+    next: UnsafeCell<Option<NonNull<CcOnHeap<dyn Trace>>>>,
     prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
-
-    #[cfg(feature = "nightly")]
-    vtable: DynMetadata<dyn InternalTrace>,
-
-    #[cfg(not(feature = "nightly"))]
-    fat_ptr: NonNull<dyn InternalTrace>,
 
     counter_marker: CounterMarker,
     _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
@@ -395,10 +392,6 @@ impl<T: Trace + 'static> CcOnHeap<T> {
                 CcOnHeap {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
-                    #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
-                    #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
                     counter_marker: CounterMarker::new_with_counter_to_one(already_finalized),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
@@ -433,20 +426,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    pub(crate) fn layout(&self) -> Layout {
-        #[cfg(feature = "nightly")]
-        {
-            self.vtable.layout()
-        }
-
-        #[cfg(not(feature = "nightly"))]
-        unsafe {
-            Layout::for_value(self.fat_ptr.as_ref())
-        }
-    }
-
-    #[inline]
-    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcOnHeap<()>>> {
+    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcOnHeap<dyn Trace>>> {
         self.next.get()
     }
 
@@ -456,7 +436,7 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
+/*unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
         self.get_elem().trace(ctx);
@@ -468,7 +448,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
     fn finalize(&self) {
         self.get_elem().finalize();
     }
-}
+}*/
 
 #[inline]
 pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
@@ -501,7 +481,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 }
 
 #[inline]
-pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
+pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<dyn Trace>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
@@ -513,7 +493,7 @@ pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
             #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(list.contains(ptr));
 
-            list.remove(ptr);
+            list.remove(ptr.cast());
             // In this case we don't need to update the mark since we put it back into the list
         } else {
             // Confirm !is_in_possible_cycles() in debug builds
@@ -533,47 +513,20 @@ pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
 }
 
 // Functions in common between every CcOnHeap<_>
-impl CcOnHeap<()> {
-    #[inline]
-    pub(super) fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        unsafe {
-            CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
-        }
-    }
-
+impl CcOnHeap<dyn Trace> {
     #[cfg(feature = "finalization")]
     #[inline]
     pub(super) fn finalize_inner(ptr: NonNull<Self>) -> bool {
         unsafe {
-            if ptr.as_ref().counter_marker().needs_finalization() {
+            if ptr.into_inner().as_ref().counter_marker().needs_finalization() {
                 // Set finalized
-                ptr.as_ref().counter_marker().set_finalized(true);
+                ptr.into_inner().as_ref().counter_marker().set_finalized(true);
 
-                CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
+                ptr.as_ref().finalize_elem();
                 true
             } else {
                 false
             }
-        }
-    }
-
-    /// SAFETY: `drop_in_place` conditions must be true.
-    #[inline]
-    pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        CcOnHeap::get_traceable(ptr).as_mut().drop_elem();
-    }
-
-    #[inline]
-    fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
-        #[cfg(feature = "nightly")]
-        unsafe {
-            let vtable = ptr.as_ref().vtable;
-            NonNull::from_raw_parts(ptr.cast(), vtable)
-        }
-
-        #[cfg(not(feature = "nightly"))]
-        unsafe {
-            ptr.as_ref().fat_ptr
         }
     }
 
@@ -604,7 +557,7 @@ impl CcOnHeap<()> {
         //
         // This function is called from collect_cycles(), which doesn't know the
         // exact type of the element inside CcOnHeap, so trace it using the vtable
-        CcOnHeap::trace_inner(ptr, ctx);
+        unsafe { ptr.as_ref() }.get_elem().trace(ctx);
     }
 
     /// Returns whether `ptr.elem` should be traced.
@@ -614,7 +567,7 @@ impl CcOnHeap<()> {
     /// to the caller, which *might* have more information on the type inside CcOnHeap than us).
     #[inline(never)] // Don't inline this function, it's huge
     #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
-    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
+    fn should_trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         #[inline(always)]
         fn non_root(counter_marker: &CounterMarker) -> bool {
             counter_marker.tracing_counter() == counter_marker.counter()
@@ -630,7 +583,7 @@ impl CcOnHeap<()> {
                     // Not already marked
 
                     // Make sure ptr is not in POSSIBLE_CYCLES list
-                    remove_from_list(ptr);
+                    remove_from_list(ptr.cast());
 
                     counter_marker.reset_tracing_counter();
                     let res = counter_marker.increment_tracing_counter();
@@ -661,7 +614,7 @@ impl CcOnHeap<()> {
 
                     if non_root(counter_marker) {
                         // Already marked, so ptr was put in root_list
-                        root_list.remove(ptr);
+                        root_list.remove(ptr.cast());
                         non_root_list.add(ptr);
                     }
 
@@ -676,9 +629,9 @@ impl CcOnHeap<()> {
                     counter_marker.mark(Mark::NonMarked);
 
                     if non_root(counter_marker) {
-                        non_root_list.remove(ptr);
+                        non_root_list.remove(ptr.cast());
                     } else {
-                        root_list.remove(ptr);
+                        root_list.remove(ptr.cast());
                     }
 
                     // Continue root tracing
@@ -692,21 +645,14 @@ impl CcOnHeap<()> {
     }
 }
 
-// Trait used to make it possible to drop/finalize only the elem field of CcOnHeap
-// and without taking a &mut reference to the whole CcOnHeap
-trait InternalTrace: Trace {
-    fn finalize_elem(&self);
-
-    /// Safety: see `drop_in_place`
-    unsafe fn drop_elem(&self);
+/*trait InternalTraceExt {
+    fn into_inner(self) -> NonNull<CcOnHeap<()>>;
 }
 
-impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
-    fn finalize_elem(&self) {
-        self.get_elem().finalize();
+impl InternalTraceExt for NonNull<CcOnHeap<dyn Trace>> {
+    #[inline(always)]
+    fn into_inner(self) -> NonNull<CcOnHeap<()>> {
+        // SAFETY: The only implementor of InternalTrace is CcOnHeap and it is repr(C)
+        self.cast()
     }
-
-    unsafe fn drop_elem(&self) {
-        drop_in_place(self.get_elem_mut());
-    }
-}
+}*/

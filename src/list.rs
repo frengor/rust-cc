@@ -1,10 +1,10 @@
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-use crate::{CcOnHeap, Mark};
+use crate::{CcOnHeap, Mark, Trace};
 
 pub(crate) struct List {
-    first: Option<NonNull<CcOnHeap<()>>>,
+    first: Option<NonNull<CcOnHeap<dyn Trace>>>,
 }
 
 impl List {
@@ -15,15 +15,15 @@ impl List {
 
     #[inline]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
+    pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<dyn Trace>>> {
         self.first
     }
 
     #[inline]
-    pub(crate) fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    pub(crate) fn add(&mut self, ptr: NonNull<CcOnHeap<dyn Trace>>) {
         if let Some(first) = &mut self.first {
             unsafe {
-                *first.as_ref().get_prev() = Some(ptr);
+                *first.as_ref().get_prev() = Some(ptr.cast());
                 *ptr.as_ref().get_next() = Some(*first);
                 *ptr.as_ref().get_prev() = None; // Not really necessary
             }
@@ -68,7 +68,7 @@ impl List {
     }
 
     #[inline]
-    pub(crate) fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+    pub(crate) fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<dyn Trace>>> {
         match self.first {
             Some(first) => unsafe {
                 self.first = *first.as_ref().get_next();
@@ -96,7 +96,7 @@ impl List {
 
     #[inline]
     #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
-    pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
+    pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<dyn Trace>>) -> bool {
         self.iter().any(|elem| elem == ptr)
     }
 
@@ -125,7 +125,7 @@ impl List {
             unsafe {
                 *prev.as_ref().get_next() = to_append.first;
                 if let Some(ptr) = to_append.first {
-                    *ptr.as_ref().get_prev() = Some(prev);
+                    *ptr.as_ref().get_prev() = Some(prev.cast());
                 }
             }
         } else {
@@ -147,7 +147,7 @@ impl Drop for List {
 }
 
 impl<'a> IntoIterator for &'a List {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcOnHeap<dyn Trace>>;
     type IntoIter = Iter<'a>;
 
     #[inline]
@@ -160,7 +160,7 @@ impl<'a> IntoIterator for &'a List {
 }
 
 impl IntoIterator for List {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcOnHeap<dyn Trace>>;
     type IntoIter = ListIter;
 
     #[inline]
@@ -172,12 +172,12 @@ impl IntoIterator for List {
 }
 
 pub(crate) struct Iter<'a> {
-    next: Option<NonNull<CcOnHeap<()>>>,
-    _phantom: PhantomData<&'a CcOnHeap<()>>,
+    next: Option<NonNull<CcOnHeap<dyn Trace>>>,
+    _phantom: PhantomData<&'a CcOnHeap<dyn Trace>>,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcOnHeap<dyn Trace>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -200,7 +200,7 @@ pub(crate) struct ListIter {
 }
 
 impl Iterator for ListIter {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcOnHeap<dyn Trace>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
