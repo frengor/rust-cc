@@ -3,6 +3,31 @@ use core::ptr::NonNull;
 
 use crate::{CcOnHeap, Mark};
 
+/// Methods shared by lists
+pub(crate) trait ListMethods: Sized {
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn first(&self) -> Option<NonNull<CcOnHeap<()>>>;
+
+    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>);
+
+    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>);
+
+    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>>;
+
+    fn is_empty(&self) -> bool;
+
+    #[inline]
+    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
+    fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
+        self.iter().any(|elem| elem == ptr)
+    }
+
+    fn iter(&self) -> Iter;
+
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn into_iter(self) -> ListIter<Self>;
+}
+
 pub(crate) struct List {
     first: Option<NonNull<CcOnHeap<()>>>,
 }
@@ -12,15 +37,17 @@ impl List {
     pub(crate) const fn new() -> List {
         List { first: None }
     }
+}
 
+impl ListMethods for List {
     #[inline]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    pub(crate) fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
         self.first
     }
 
     #[inline]
-    pub(crate) fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
         if let Some(first) = &mut self.first {
             unsafe {
                 *first.as_ref().get_prev() = Some(ptr);
@@ -39,8 +66,7 @@ impl List {
     }
 
     #[inline]
-    pub(crate) fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
-        // Remove from possible_cycles list
+    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
         unsafe {
             match (*ptr.as_ref().get_next(), *ptr.as_ref().get_prev()) {
                 (Some(next), Some(prev)) => {
@@ -68,7 +94,7 @@ impl List {
     }
 
     #[inline]
-    pub(crate) fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
         match self.first {
             Some(first) => unsafe {
                 self.first = *first.as_ref().get_next();
@@ -90,49 +116,19 @@ impl List {
     }
 
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.first.is_none()
     }
 
     #[inline]
-    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
-    pub(crate) fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
-        self.iter().any(|elem| elem == ptr)
-    }
-
-    #[inline]
-    pub(crate) fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter {
         self.into_iter()
     }
 
     #[inline]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    pub(crate) fn into_iter(self) -> ListIter {
+    fn into_iter(self) -> ListIter<List> {
         <Self as IntoIterator>::into_iter(self)
-    }
-
-    /// The elements in `to_append` are assumed to be already marked with `mark` mark.
-    #[inline]
-    #[cfg(feature = "finalization")]
-    pub(crate) fn mark_self_and_append(&mut self, mark: Mark, to_append: List) {
-        if let Some(mut prev) = self.first {
-            for elem in self.iter() {
-                unsafe {
-                    elem.as_ref().counter_marker().mark(mark);
-                }
-                prev = elem;
-            }
-            unsafe {
-                *prev.as_ref().get_next() = to_append.first;
-                if let Some(ptr) = to_append.first {
-                    *ptr.as_ref().get_prev() = Some(prev);
-                }
-            }
-        } else {
-            self.first = to_append.first;
-            // to_append.first.prev is already None
-        }
-        core::mem::forget(to_append); // Don't run to_append destructor
     }
 }
 
@@ -161,7 +157,7 @@ impl<'a> IntoIterator for &'a List {
 
 impl IntoIterator for List {
     type Item = NonNull<CcOnHeap<()>>;
-    type IntoIter = ListIter;
+    type IntoIter = ListIter<List>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -195,15 +191,147 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-pub(crate) struct ListIter {
-    list: List,
+pub(crate) struct ListIter<T: ListMethods> {
+    list: T,
 }
 
-impl Iterator for ListIter {
+impl<T: ListMethods> Iterator for ListIter<T> {
     type Item = NonNull<CcOnHeap<()>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.list.remove_first()
+    }
+}
+
+/// A [`List`] which keeps track of its size. Used in [`POSSIBLE_CYCLES`].
+///
+/// [`POSSIBLE_CYCLES`]: crate::POSSIBLE_CYCLES
+pub(crate) struct CountedList {
+    list: List,
+    size: usize,
+}
+
+impl CountedList {
+    #[inline]
+    pub(crate) const fn new() -> CountedList {
+        CountedList {
+            list: List::new(),
+            size: 0,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn size(&self) -> usize {
+        self.size
+    }
+
+    /// # Safety
+    /// * The elements in `to_append` must be already marked with `mark` mark
+    /// * `to_append_size` must be the size of `to_append`
+    #[inline]
+    #[cfg(feature = "finalization")]
+    pub(crate) unsafe fn mark_self_and_append(&mut self, mark: Mark, to_append: List, to_append_size: usize) {
+        if let Some(mut prev) = self.list.first {
+            for elem in self.list.iter() {
+                unsafe {
+                    elem.as_ref().counter_marker().mark(mark);
+                }
+                prev = elem;
+            }
+            unsafe {
+                *prev.as_ref().get_next() = to_append.first;
+                if let Some(ptr) = to_append.first {
+                    *ptr.as_ref().get_prev() = Some(prev);
+                }
+            }
+        } else {
+            self.list.first = to_append.first;
+            // to_append.first.prev is already None
+        }
+        self.size += to_append_size;
+        core::mem::forget(to_append); // Don't run to_append destructor
+    }
+
+    /// # Safety
+    /// `to_swap_size` must be the size of `to_swap`.
+    #[inline]
+    #[cfg(feature = "finalization")]
+    pub(crate) unsafe fn swap_list(&mut self, to_swap: &mut List, to_swap_size: usize) {
+        self.size = to_swap_size;
+        core::mem::swap(&mut self.list, to_swap);
+    }
+}
+
+impl ListMethods for CountedList {
+    #[inline]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
+        self.list.first()
+    }
+
+    #[inline]
+    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+        self.size += 1;
+        self.list.add(ptr)
+    }
+
+    #[inline]
+    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+        self.size -= 1;
+        self.list.remove(ptr)
+    }
+
+    #[inline]
+    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+        let ptr = self.list.remove_first();
+        if ptr.is_some() {
+            self.size -= 1;
+        }
+        ptr
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    #[inline]
+    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
+    fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
+        self.list.contains(ptr)
+    }
+
+    #[inline]
+    fn iter(&self) -> Iter {
+        self.list.iter()
+    }
+
+    #[inline]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn into_iter(self) -> ListIter<CountedList> {
+        <Self as IntoIterator>::into_iter(self)
+    }
+}
+
+impl<'a> IntoIterator for &'a CountedList {
+    type Item = NonNull<CcOnHeap<()>>;
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.list.iter()
+    }
+}
+
+impl IntoIterator for CountedList {
+    type Item = NonNull<CcOnHeap<()>>;
+    type IntoIter = ListIter<CountedList>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        ListIter {
+            list: self,
+        }
     }
 }

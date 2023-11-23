@@ -17,7 +17,7 @@ use core::ptr::NonNull;
 
 use crate::cc::CcOnHeap;
 use crate::counter_marker::Mark;
-use crate::list::List;
+use crate::list::*;
 use crate::state::{replace_state_field, State, try_state};
 use crate::trace::ContextInner;
 use crate::utils::*;
@@ -48,7 +48,7 @@ pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 
 rust_cc_thread_local! {
-    pub(crate) static POSSIBLE_CYCLES: RefCell<List> = RefCell::new(List::new());
+    pub(crate) static POSSIBLE_CYCLES: RefCell<CountedList> = RefCell::new(CountedList::new());
 }
 
 pub fn collect_cycles() {
@@ -85,7 +85,7 @@ fn adjust_trigger_point(state: &State) {
     let _ = config::config(|config| config.adjust(state));
 }
 
-fn collect(state: &State, possible_cycles: &RefCell<List>) {
+fn collect(state: &State, possible_cycles: &RefCell<CountedList>) {
     state.set_collecting(true);
     state.increment_executions_count();
 
@@ -135,7 +135,7 @@ fn collect(state: &State, possible_cycles: &RefCell<List>) {
     // _drop_guard is dropped here, setting state.collecting to false
 }
 
-fn __collect(state: &State, possible_cycles: &RefCell<List>) {
+fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
     let mut non_root_list = List::new();
     {
         let mut root_list = List::new();
@@ -163,10 +163,12 @@ fn __collect(state: &State, possible_cycles: &RefCell<List>) {
         #[cfg(feature = "finalization")]
         {
             let has_finalized: bool;
+            let mut non_root_list_size = 0usize; // Counting the size of non_root only now since it is required by mark_self_and_append
             {
                 let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
                 has_finalized = non_root_list.iter().fold(false, |has_finalized, ptr| {
+                    non_root_list_size += 1;
                     CcOnHeap::finalize_inner(ptr.cast()) | has_finalized
                 });
 
@@ -187,8 +189,18 @@ fn __collect(state: &State, possible_cycles: &RefCell<List>) {
                 // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
                 // append the other to it in O(1), since we already know the last element of pc from the marking.
                 // This avoids iterating unnecessarily both lists and the need to update many pointers.
-                mem::swap(&mut *pc, &mut non_root_list);
-                pc.mark_self_and_append(Mark::PossibleCycles, non_root_list);
+
+                let old_size = pc.size();
+
+                // SAFETY: non_root_list_size is calculated before and it's the size of non_root_list
+                unsafe {
+                    pc.swap_list(&mut non_root_list, non_root_list_size);
+                }
+                // SAFETY: swap_list swapped pc and non_root_list, so every element inside non_root_list is already
+                //         marked PossibleCycles (because it was pc) and now old_size is the size of non_root_list
+                unsafe {
+                    pc.mark_self_and_append(Mark::PossibleCycles, non_root_list, old_size);
+                }
                 drop(pc); // Useless, but better be explicit here in case more code is added below this line
             }
         }
@@ -201,12 +213,12 @@ fn __collect(state: &State, possible_cycles: &RefCell<List>) {
 }
 
 #[inline]
-fn is_empty(list: &RefCell<List>) -> bool {
+fn is_empty(list: &RefCell<CountedList>) -> bool {
     list.borrow().is_empty()
 }
 
 #[inline]
-fn get_and_remove_first(list: &RefCell<List>) -> Option<NonNull<CcOnHeap<()>>> {
+fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcOnHeap<()>>> {
     list.borrow_mut().remove_first()
 }
 

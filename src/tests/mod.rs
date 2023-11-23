@@ -5,7 +5,8 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 
 use crate::trace::Trace;
-use crate::{state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
+use crate::list::*;
+use crate::{state, Cc, Context, Finalize, POSSIBLE_CYCLES};
 use crate::state::state;
 
 mod bench_code;
@@ -22,7 +23,7 @@ mod cleaners;
 
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
-        pc.replace(List::new());
+        pc.replace(CountedList::new());
     });
     state::reset_state();
 
