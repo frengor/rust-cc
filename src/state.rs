@@ -123,6 +123,7 @@ impl State {
     }
 
     #[inline]
+    #[allow(dead_code)] // Currently used only inside #[cfg(debug_assertions)], but always keep it
     pub(crate) fn is_tracing(&self) -> bool {
         #[cfg(feature = "finalization")]
         {
