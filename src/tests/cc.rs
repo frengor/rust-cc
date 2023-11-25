@@ -411,3 +411,40 @@ fn cyclic_finalization_ends() {
     let _ = Cyclic::new();
     collect_cycles();
 }
+
+#[test]
+fn buffered_objects_count_test() {
+    reset_state();
+
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+    }
+
+    assert_eq!(0, state::buffered_objects_count().unwrap());
+
+    let cc = {
+        let cc = Cc::new(Cyclic {
+            cyclic: RefCell::new(None),
+        });
+        *cc.cyclic.borrow_mut() = Some(cc.clone());
+        cc.clone()
+    };
+
+    assert_eq!(1, state::buffered_objects_count().unwrap());
+
+    cc.mark_alive();
+
+    assert_eq!(0, state::buffered_objects_count().unwrap());
+
+    drop(cc);
+    collect_cycles();
+}

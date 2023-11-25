@@ -144,6 +144,18 @@ impl Default for State {
 }
 
 #[inline]
+pub fn buffered_objects_count() -> Result<usize, StateAccessError> {
+    // Expose this in state module even though the count is kept inside POSSIBLE_CYCLES
+    // The error returned in case of failed access is a generic StateAccessError::AccessError
+    crate::POSSIBLE_CYCLES.try_with(|pc| {
+        match pc.try_borrow() {
+            Ok(pc) => Ok(pc.size()),
+            Err(_) => Err(StateAccessError::AccessError),
+        }
+    }).unwrap_or(Err(StateAccessError::AccessError))
+}
+
+#[inline]
 pub fn allocated_bytes() -> Result<usize, StateAccessError> {
     try_state(|state| Ok(state.allocated_bytes()))?
 }
