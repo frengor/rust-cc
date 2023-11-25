@@ -1,6 +1,7 @@
 use core::cell::RefCell;
 
 use thiserror::Error;
+use crate::list::CountedList;
 
 use crate::state::State;
 use crate::utils;
@@ -38,6 +39,7 @@ pub struct Config {
     // bytes_threshold * adjustment_percent < allocated_bytes < bytes_threshold
     bytes_threshold: usize,
     adjustment_percent: f64,
+    buffered_threshold: usize,
     auto_collect: bool,
 }
 
@@ -47,6 +49,7 @@ impl Config {
         Self {
             bytes_threshold: DEFAULT_BYTES_THRESHOLD,
             adjustment_percent: 0.25,
+            buffered_threshold: 256,
             auto_collect: true,
         }
     }
@@ -76,9 +79,24 @@ impl Config {
         self.adjustment_percent = percent;
     }
 
+    #[inline]
+    pub fn buffered_objects_threshold(&self) -> usize {
+        self.buffered_threshold
+    }
+
+    #[inline]
+    #[track_caller]
+    pub fn set_buffered_objects_threshold(&mut self, threshold: usize) {
+        assert!(threshold > 0, "threshold cannot be 0");
+        self.buffered_threshold = threshold;
+    }
+
     #[inline(always)]
-    pub(super) fn should_collect(&mut self, state: &State) -> bool {
-        self.auto_collect() && state.allocated_bytes() > self.bytes_threshold
+    pub(super) fn should_collect(&mut self, state: &State, possible_cycles: &RefCell<CountedList>) -> bool {
+        self.auto_collect() && (
+            state.allocated_bytes() > self.bytes_threshold
+            || possible_cycles.try_borrow().map_or(false, |pc| pc.size() > self.buffered_threshold)
+        )
     }
 
     #[inline(always)]

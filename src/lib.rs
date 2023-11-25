@@ -70,13 +70,17 @@ pub fn collect_cycles() {
 #[inline(never)]
 pub(crate) fn trigger_collection() {
     let _ = try_state(|state| {
-        if !state.is_collecting() && config::config(|config| config.should_collect(state)).unwrap_or(false) {
-            let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                collect(state, pc);
-            });
-
-            adjust_trigger_point(state);
+        if state.is_collecting() {
+            return;
         }
+
+        let _ = POSSIBLE_CYCLES.try_with(|pc| {
+            if config::config(|config| config.should_collect(state, pc)).unwrap_or(false) {
+                collect(state, pc);
+
+                adjust_trigger_point(state);
+            }
+        });
     });
 }
 
