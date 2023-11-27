@@ -73,8 +73,8 @@ impl Config {
     #[track_caller]
     pub fn set_adjustment_percent(&mut self, percent: f64) {
         assert!(
-            percent > 0f64 && percent < 1f64,
-            "percent must be between 0 and 1 (excluded)"
+            (0f64..=1f64).contains(&percent),
+            "percent must be between 0 and 1"
         );
         self.adjustment_percent = percent;
     }
@@ -105,9 +105,9 @@ impl Config {
         if state.allocated_bytes() >= self.bytes_threshold {
 
             loop {
-                let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { return; };
+                let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { break; };
                 self.bytes_threshold = new_threshold;
-                if !state.allocated_bytes() >= self.bytes_threshold {
+                if state.allocated_bytes() < self.bytes_threshold {
                     break;
                 }
             }
@@ -118,6 +118,11 @@ impl Config {
         // Second case: the threshold might have to be decreased
         let allocated = state.allocated_bytes() as f64;
         let mut bytes_threshold = self.bytes_threshold;
+
+        // If adjustment_percent or the result of the multiplication is 0 do nothing
+        if ((bytes_threshold as f64) * self.adjustment_percent) == 0.0 {
+            return;
+        }
 
         // No more cases after this, there's no need to use an additional if as above
         while allocated <= ((bytes_threshold as f64) * self.adjustment_percent) {
