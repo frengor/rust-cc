@@ -120,7 +120,7 @@ impl Config {
         let mut bytes_threshold = self.bytes_threshold;
 
         // No more cases after this, there's no need to use an additional if as above
-        while allocated <= ((self.bytes_threshold as f64) * self.adjustment_percent) {
+        while allocated <= ((bytes_threshold as f64) * self.adjustment_percent) {
             bytes_threshold <<= 1;
             if bytes_threshold <= DEFAULT_BYTES_THRESHOLD {
                 self.bytes_threshold = DEFAULT_BYTES_THRESHOLD;
