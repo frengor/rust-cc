@@ -1,6 +1,7 @@
 #![cfg(feature = "auto-collect")]
 
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 
 use rust_cc::{Cc, collect_cycles, Context, Finalize, Trace};
 use rust_cc::config::config;
@@ -96,7 +97,7 @@ fn test_buffered_threshold_auto_collect() {
     const MAX_BUFFERED_OBJS: usize = 4;
 
     // Always reset buffered objs threshold and adjustment percent, even with panics
-    struct DropGuard(f64, usize);
+    struct DropGuard(f64, Option<NonZeroUsize>);
     impl Drop for DropGuard {
         fn drop(&mut self) {
             config(|config| {
@@ -108,7 +109,7 @@ fn test_buffered_threshold_auto_collect() {
     let _drop_guard = config(|config| {
         let guard = DropGuard(config.adjustment_percent(), config.buffered_objects_threshold());
         config.set_adjustment_percent(0.0);
-        config.set_buffered_objects_threshold(3);
+        config.set_buffered_objects_threshold(Some(NonZeroUsize::new(3).unwrap()));
         guard
     }).expect("Couldn't set buffered objs threshold and adjustment percent");
 
