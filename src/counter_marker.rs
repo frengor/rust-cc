@@ -25,7 +25,7 @@ pub(crate) const MAX: u32 = COUNTER_MASK;
 /// +-----------+----------+------------+------------+
 /// ```
 ///
-/// * `A` has 4 possible states:
+/// * `A` has 3 possible states:
 ///   * `NON_MARKED`
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
 ///   * `TRACED`
