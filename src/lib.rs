@@ -15,7 +15,7 @@ use core::mem;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
-use crate::cc::CcOnHeap;
+use crate::cc::CcBox;
 use crate::counter_marker::Mark;
 use crate::list::*;
 use crate::state::{replace_state_field, State, try_state};
@@ -173,7 +173,7 @@ fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
 
                 has_finalized = non_root_list.iter().fold(false, |has_finalized, ptr| {
                     non_root_list_size += 1;
-                    CcOnHeap::finalize_inner(ptr.cast()) | has_finalized
+                    CcBox::finalize_inner(ptr.cast()) | has_finalized
                 });
 
                 // _finalizing_guard is dropped here, resetting state.finalizing
@@ -182,7 +182,7 @@ fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
             if !has_finalized {
                 deallocate_list(non_root_list, state);
             } else {
-                // Put CcOnHeaps back into the possible cycles list. They will be re-processed in the
+                // Put CcBoxes back into the possible cycles list. They will be re-processed in the
                 // next iteration of the loop, which will automatically check for resurrected objects
                 // using the same algorithm of the initial tracing. This makes it more difficult to
                 // create memory leaks accidentally using finalizers than in the previous implementation.
@@ -222,7 +222,7 @@ fn is_empty(list: &RefCell<CountedList>) -> bool {
 }
 
 #[inline]
-fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcOnHeap<()>>> {
+fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcBox<()>>> {
     list.borrow_mut().remove_first()
 }
 
@@ -230,13 +230,13 @@ fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcOnHeap<
 fn deallocate_list(to_deallocate_list: List, state: &State) {
     let _dropping_guard = replace_state_field!(dropping, true, state);
 
-    // Drop every CcOnHeap before deallocating them (see comment below)
+    // Drop every CcBox before deallocating them (see comment below)
     to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr is valid to access and drop in place
         unsafe {
             debug_assert!(ptr.as_ref().counter_marker().is_traced());
 
-            CcOnHeap::drop_inner(ptr.cast());
+            CcBox::drop_inner(ptr.cast());
         };
 
         // Don't deallocate now since next drop_inner calls will probably access this object while executing drop glues
@@ -260,7 +260,7 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
 }
 
 fn trace_counting(
-    ptr: NonNull<CcOnHeap<()>>,
+    ptr: NonNull<CcBox<()>>,
     root_list: &mut List,
     non_root_list: &mut List,
 ) {
@@ -269,13 +269,13 @@ fn trace_counting(
         non_root_list,
     });
 
-    CcOnHeap::start_tracing(ptr, &mut ctx);
+    CcBox::start_tracing(ptr, &mut ctx);
 }
 
 fn trace_roots(mut root_list: List, non_root_list: &mut List) {
     while let Some(ptr) = root_list.remove_first() {
         let mut ctx = Context::new(ContextInner::RootTracing { non_root_list, root_list: &mut root_list });
-        CcOnHeap::start_tracing(ptr, &mut ctx);
+        CcBox::start_tracing(ptr, &mut ctx);
     }
 
     mem::forget(root_list); // root_list is empty, no need run List::drop

@@ -17,14 +17,14 @@ However, the implementation differs in order to make the collector faster and mo
 
 The following is a summarized version of the collection algorithm:  
 When a `Cc` smart pointer is dropped, the reference count (RC) is decreased by 1. If it reaches 0, then the allocated
-object pointed by the `Cc` (called `CcOnHeap`) is dropped, otherwise the `Cc` is put into the `POSSIBLE_CYCLES` list.  
+object pointed by the `Cc` (called `CcBox`) is dropped, otherwise the `Cc` is put into the `POSSIBLE_CYCLES` list.  
 The `POSSIBLE_CYCLES` is an (intrusive) list which contains the possible roots of cyclic garbage.  
 Sometimes (see [`crate::trigger_collection`](./src/lib.rs)), when creating a new `Cc` or when `collect_cycles` is called,
 the objects inside the `POSSIBLE_CYCLES` list are checked to see if they are part of a garbage cycle.
 
 Therefore, they undergo two tracing passes:
 - **Trace Counting:** during this phase, starting from the elements inside `POSSIBLE_CYCLES`,
-  objects are traced to count the amount of pointers to each `CcOnHeap` that are reachable from the list's `Cc`s.  
+  objects are traced to count the amount of pointers to each `CcBox` that is reachable from the list's `Cc`s.  
   The `tracing_counter` "field" (see the [`counter_marker` module](./src/counter_marker.rs) for more info) is used to keep track of this number.
   <details>
   <summary>About tracing_counter</summary>
@@ -33,7 +33,7 @@ Therefore, they undergo two tracing passes:
      The invariant regarding this second counter is that it must always be between 0 and RC inclusively. 
   </p>
   </details>
-- **Trace Roots:** now, every `CcOnHeap` which has the RC strictly greater than `tracing_counter` can be considered a root,
+- **Trace Roots:** now, every `CcBox` which has the RC strictly greater than `tracing_counter` can be considered a root,
   since it must exist a `Cc` pointer which points at it that hasn't been traced before. Thus, a trace is started from these roots,
   and all objects not reached during this trace are finalized/deallocated (the story is more complicated because of possible
   object resurrections, see comments at the end of the [`collect` function](./src/lib.rs)).  

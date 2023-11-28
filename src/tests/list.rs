@@ -3,7 +3,7 @@ use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::NonNull;
 
-use crate::{CcOnHeap, Mark};
+use crate::{CcBox, Mark};
 use crate::list::*;
 use crate::counter_marker::CounterMarker;
 
@@ -14,7 +14,7 @@ fn assert_contains(list: &impl ListMethodsExt, mut elements: Vec<i32>) {
         // Test contains
         assert!(list.contains(ptr));
 
-        let elem = unsafe { *ptr.cast::<CcOnHeap<i32>>().as_ref().get_elem() };
+        let elem = unsafe { *ptr.cast::<CcBox<i32>>().as_ref().get_elem() };
         let index = elements.iter().position(|&i| i == elem);
         assert!(index.is_some(), "Couldn't find element {} in list.", elem);
         elements.swap_remove(index.unwrap());
@@ -27,15 +27,15 @@ fn assert_contains(list: &impl ListMethodsExt, mut elements: Vec<i32>) {
     );
 }
 
-fn new_list(elements: &[i32], list: &mut impl ListMethodsExt) -> Vec<NonNull<CcOnHeap<i32>>> {
+fn new_list(elements: &[i32], list: &mut impl ListMethodsExt) -> Vec<NonNull<CcBox<i32>>> {
     elements
         .iter()
-        .map(|&i| CcOnHeap::new_for_tests(i))
+        .map(|&i| CcBox::new_for_tests(i))
         .inspect(|&ptr| list.add(ptr.cast()))
         .collect()
 }
 
-fn deallocate(elements: Vec<NonNull<CcOnHeap<i32>>>) {
+fn deallocate(elements: Vec<NonNull<CcBox<i32>>>) {
     elements.into_iter().for_each(|ptr| unsafe {
         assert!(
             (*ptr.as_ref().get_next()).is_none(),
@@ -47,7 +47,7 @@ fn deallocate(elements: Vec<NonNull<CcOnHeap<i32>>>) {
             "{} has a prev",
             *ptr.as_ref().get_elem()
         );
-        dealloc(ptr.cast().as_ptr(), Layout::new::<CcOnHeap<i32>>());
+        dealloc(ptr.cast().as_ptr(), Layout::new::<CcBox<i32>>());
     });
 }
 
@@ -143,7 +143,7 @@ fn test_for_each_clearing_panic(mut list: impl ListMethodsExt) {
     }
 
     let res = catch_unwind(AssertUnwindSafe(|| list.into_iter().for_each(|ptr| {
-        // Manually set mark for the first CcOnHeap, the others should be handled by List::drop
+        // Manually set mark for the first CcBox, the others should be handled by List::drop
         unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
 
         panic!("into_iter().for_each panic");
@@ -152,7 +152,7 @@ fn test_for_each_clearing_panic(mut list: impl ListMethodsExt) {
     assert!(res.is_err(), "Hasn't panicked.");
 
     for it in vec.iter() {
-        fn counter_marker(it: &NonNull<CcOnHeap<i32>>) -> &CounterMarker {
+        fn counter_marker(it: &NonNull<CcBox<i32>>) -> &CounterMarker {
             unsafe { it.as_ref().counter_marker() }
         }
 
@@ -168,17 +168,17 @@ fn test_for_each_clearing_panic(mut list: impl ListMethodsExt) {
 #[test_case(List::new())]
 #[test_case(CountedList::new())]
 fn test_list_moving(mut list: impl ListMethodsExt) {
-    let cc = CcOnHeap::new_for_tests(5i32);
+    let cc = CcBox::new_for_tests(5i32);
     list.add(cc.cast());
 
     let list_moved = list;
 
     list_moved.into_iter().for_each(|elem| unsafe {
-        assert_eq!(*elem.cast::<CcOnHeap<i32>>().as_ref().get_elem(), 5i32);
+        assert_eq!(*elem.cast::<CcBox<i32>>().as_ref().get_elem(), 5i32);
     });
 
     unsafe {
-        dealloc(cc.cast().as_ptr(), Layout::new::<CcOnHeap<i32>>());
+        dealloc(cc.cast().as_ptr(), Layout::new::<CcBox<i32>>());
     }
 }
 

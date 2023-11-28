@@ -1,24 +1,24 @@
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-use crate::{CcOnHeap, Mark};
+use crate::{CcBox, Mark};
 
 /// Methods shared by lists
 pub(crate) trait ListMethods: Sized {
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    fn first(&self) -> Option<NonNull<CcOnHeap<()>>>;
+    fn first(&self) -> Option<NonNull<CcBox<()>>>;
 
-    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>);
+    fn add(&mut self, ptr: NonNull<CcBox<()>>);
 
-    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>);
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>);
 
-    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>>;
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>>;
 
     fn is_empty(&self) -> bool;
 
     #[inline]
     #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
-    fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
+    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
         self.iter().any(|elem| elem == ptr)
     }
 
@@ -29,7 +29,7 @@ pub(crate) trait ListMethods: Sized {
 }
 
 pub(crate) struct List {
-    first: Option<NonNull<CcOnHeap<()>>>,
+    first: Option<NonNull<CcBox<()>>>,
 }
 
 impl List {
@@ -42,12 +42,12 @@ impl List {
 impl ListMethods for List {
     #[inline]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn first(&self) -> Option<NonNull<CcBox<()>>> {
         self.first
     }
 
     #[inline]
-    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    fn add(&mut self, ptr: NonNull<CcBox<()>>) {
         if let Some(first) = &mut self.first {
             unsafe {
                 *first.as_ref().get_prev() = Some(ptr);
@@ -66,7 +66,7 @@ impl ListMethods for List {
     }
 
     #[inline]
-    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>) {
         unsafe {
             match (*ptr.as_ref().get_next(), *ptr.as_ref().get_prev()) {
                 (Some(next), Some(prev)) => {
@@ -94,7 +94,7 @@ impl ListMethods for List {
     }
 
     #[inline]
-    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>> {
         match self.first {
             Some(first) => unsafe {
                 self.first = *first.as_ref().get_next();
@@ -143,7 +143,7 @@ impl Drop for List {
 }
 
 impl<'a> IntoIterator for &'a List {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
     type IntoIter = Iter<'a>;
 
     #[inline]
@@ -156,7 +156,7 @@ impl<'a> IntoIterator for &'a List {
 }
 
 impl IntoIterator for List {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
     type IntoIter = ListIter<List>;
 
     #[inline]
@@ -168,12 +168,12 @@ impl IntoIterator for List {
 }
 
 pub(crate) struct Iter<'a> {
-    next: Option<NonNull<CcOnHeap<()>>>,
-    _phantom: PhantomData<&'a CcOnHeap<()>>,
+    next: Option<NonNull<CcBox<()>>>,
+    _phantom: PhantomData<&'a CcBox<()>>,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -196,7 +196,7 @@ pub(crate) struct ListIter<T: ListMethods> {
 }
 
 impl<T: ListMethods> Iterator for ListIter<T> {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -266,24 +266,24 @@ impl CountedList {
 impl ListMethods for CountedList {
     #[inline]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
-    fn first(&self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn first(&self) -> Option<NonNull<CcBox<()>>> {
         self.list.first()
     }
 
     #[inline]
-    fn add(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    fn add(&mut self, ptr: NonNull<CcBox<()>>) {
         self.size += 1;
         self.list.add(ptr)
     }
 
     #[inline]
-    fn remove(&mut self, ptr: NonNull<CcOnHeap<()>>) {
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>) {
         self.size -= 1;
         self.list.remove(ptr)
     }
 
     #[inline]
-    fn remove_first(&mut self) -> Option<NonNull<CcOnHeap<()>>> {
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>> {
         let ptr = self.list.remove_first();
         if ptr.is_some() {
             self.size -= 1;
@@ -298,7 +298,7 @@ impl ListMethods for CountedList {
 
     #[inline]
     #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
-    fn contains(&self, ptr: NonNull<CcOnHeap<()>>) -> bool {
+    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
         self.list.contains(ptr)
     }
 
@@ -315,7 +315,7 @@ impl ListMethods for CountedList {
 }
 
 impl<'a> IntoIterator for &'a CountedList {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
     type IntoIter = Iter<'a>;
 
     #[inline]
@@ -325,7 +325,7 @@ impl<'a> IntoIterator for &'a CountedList {
 }
 
 impl IntoIterator for CountedList {
-    type Item = NonNull<CcOnHeap<()>>;
+    type Item = NonNull<CcBox<()>>;
     type IntoIter = ListIter<CountedList>;
 
     #[inline]

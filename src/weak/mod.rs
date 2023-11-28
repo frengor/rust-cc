@@ -9,7 +9,7 @@ use core::{
 use core::cell::Cell;
 use core::mem::MaybeUninit;
 
-use crate::cc::CcOnHeap;
+use crate::cc::CcBox;
 use crate::state::{state, try_state};
 use crate::{Cc, Context, Finalize, Trace};
 use crate::utils::{alloc_other, cc_dealloc, dealloc_other};
@@ -21,7 +21,7 @@ pub type WeakableCc<T> = Cc<Weakable<T>>;
 
 pub struct Weak<T: ?Sized + Trace + 'static> {
     metadata: NonNull<WeakMetadata>,
-    cc: NonNull<CcOnHeap<Weakable<T>>>,
+    cc: NonNull<CcBox<Weakable<T>>>,
 }
 
 #[cfg(feature = "nightly")]
@@ -111,7 +111,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Weak<T> {
         debug_assert!(res.is_ok());
 
         if self.metadata().counter() == 0 && !self.metadata().is_accessible() {
-            // No weak pointer is left and the CcOnHeap has been deallocated, so just deallocate the metadata
+            // No weak pointer is left and the CcBox has been deallocated, so just deallocate the metadata
             unsafe {
                 dealloc_other(self.metadata);
             }
@@ -200,7 +200,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
         // Immediately call inner_ptr and forget the Cc instance. Having a Cc instance is dangerous, since:
         // 1. The strong count will become 0
         // 2. The Cc::drop implementation might be accidentally called during an unwinding
-        let invalid_cc: NonNull<CcOnHeap<_>> = cc.inner_ptr();
+        let invalid_cc: NonNull<CcBox<_>> = cc.inner_ptr();
         mem::forget(cc);
 
         let metadata: NonNull<WeakMetadata> = unsafe { invalid_cc.as_ref() }.get_elem().init_get_metadata();
@@ -224,9 +224,9 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
             cc: invalid_cc.cast(), // This cast is correct since NewCyclicWrapper is repr(transparent) and contains a MaybeUninit<T>
         };
 
-        // Panic guard to deallocate the metadata and the CcOnHeap if the provided function f panics
+        // Panic guard to deallocate the metadata and the CcBox if the provided function f panics
         struct PanicGuard<T: Trace + 'static> {
-            invalid_cc: NonNull<CcOnHeap<Weakable<NewCyclicWrapper<T>>>>,
+            invalid_cc: NonNull<CcBox<Weakable<NewCyclicWrapper<T>>>>,
         }
 
         impl<T: Trace + 'static> Drop for PanicGuard<T> {
@@ -234,7 +234,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
                 unsafe {
                     // Deallocate only the metadata allocation
                     (*self.invalid_cc.as_ref().get_elem_mut()).drop_metadata();
-                    // Deallocate the CcOnHeap. Use try_state to avoiding panicking inside a Drop
+                    // Deallocate the CcBox. Use try_state to avoid panicking inside a Drop
                     let _ = try_state(|state| {
                         let layout = self.invalid_cc.as_ref().layout();
                         cc_dealloc(self.invalid_cc, layout, state);
@@ -311,7 +311,7 @@ impl<T: ?Sized + Trace + 'static> Weakable<T> {
                     // There are no weak pointers, deallocate the metadata
                     dealloc_other(metadata);
                 } else {
-                    // There exist weak pointers, set the CcOnHeap allocation not accessible
+                    // There exist weak pointers, set the CcBox allocation not accessible
                     metadata.as_ref().set_accessible(false);
                 }
             }

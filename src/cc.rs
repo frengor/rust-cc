@@ -21,7 +21,7 @@ use crate::POSSIBLE_CYCLES;
 
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
-    inner: NonNull<CcOnHeap<T>>,
+    inner: NonNull<CcBox<T>>,
     _phantom: PhantomData<Rc<T>>, // Make Cc !Send and !Sync
 }
 
@@ -48,7 +48,7 @@ impl<T: Trace + 'static> Cc<T> {
             super::trigger_collection();
 
             Cc {
-                inner: CcOnHeap::new(t, state),
+                inner: CcBox::new(t, state),
                 _phantom: PhantomData,
             }
         })
@@ -133,20 +133,20 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn inner(&self) -> &CcOnHeap<T> {
+    pub(crate) fn inner(&self) -> &CcBox<T> {
         unsafe { self.inner.as_ref() }
     }
 
     #[cfg(feature = "weak-ptr")]
     #[inline(always)]
-    pub(crate) fn inner_ptr(&self) -> NonNull<CcOnHeap<T>> {
+    pub(crate) fn inner_ptr(&self) -> NonNull<CcBox<T>> {
         self.inner
     }
 
     #[cfg(feature = "weak-ptr")] // Currently used only here
     #[inline(always)]
     #[must_use]
-    pub(crate) fn __new_internal(inner: NonNull<CcOnHeap<T>>) -> Cc<T> {
+    pub(crate) fn __new_internal(inner: NonNull<CcBox<T>>) -> Cc<T> {
         Cc {
             inner,
             _phantom: PhantomData,
@@ -200,7 +200,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
         let res = self.counter_marker().decrement_counter();
         debug_assert!(res.is_ok());
 
-        // A CcOnHeap can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
+        // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
         // In this case, no further action has to be taken, since the counter has been already decremented.
         if self.counter_marker().is_traced() {
             return;
@@ -252,7 +252,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if CcOnHeap::trace(self.inner.cast(), ctx) {
+        if CcBox::trace(self.inner.cast(), ctx) {
             self.inner().get_elem().trace(ctx);
         }
     }
@@ -261,9 +261,9 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
 impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
 
 #[repr(C)]
-pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
-    next: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
-    prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
+pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
+    next: UnsafeCell<Option<NonNull<CcBox<()>>>>,
+    prev: UnsafeCell<Option<NonNull<CcBox<()>>>>,
 
     #[cfg(feature = "nightly")]
     vtable: DynMetadata<dyn InternalTrace>,
@@ -272,18 +272,18 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     fat_ptr: NonNull<dyn InternalTrace>,
 
     counter_marker: CounterMarker,
-    _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
+    _phantom: PhantomData<Rc<()>>, // Make CcBox !Send and !Sync
 
     // This UnsafeCell is necessary, since we want to execute Drop::drop (which takes an &mut)
-    // for elem but still have access to the other fields of CcOnHeap
+    // for elem but still have access to the other fields of CcBox
     elem: UnsafeCell<T>,
 }
 
-impl<T: Trace + 'static> CcOnHeap<T> {
+impl<T: Trace + 'static> CcBox<T> {
     #[inline(always)]
     #[must_use]
-    fn new(t: T, state: &State) -> NonNull<CcOnHeap<T>> {
-        let layout = Layout::new::<CcOnHeap<T>>();
+    fn new(t: T, state: &State) -> NonNull<CcBox<T>> {
+        let layout = Layout::new::<CcBox<T>>();
 
         #[cfg(feature = "finalization")]
         let already_finalized = state.is_finalizing();
@@ -291,10 +291,10 @@ impl<T: Trace + 'static> CcOnHeap<T> {
         let already_finalized = false;
 
         unsafe {
-            let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout, state);
+            let ptr: NonNull<CcBox<T>> = cc_alloc(layout, state);
             ptr::write(
                 ptr.as_ptr(),
-                CcOnHeap {
+                CcBox {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
                     #[cfg(feature = "nightly")]
@@ -313,12 +313,12 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     #[inline(always)]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
-    pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
-        state(|state| CcOnHeap::new(t, state))
+    pub(crate) fn new_for_tests(t: T) -> NonNull<CcBox<T>> {
+        state(|state| CcBox::new(t, state))
     }
 }
 
-impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> CcBox<T> {
     #[inline]
     pub(crate) fn get_elem(&self) -> &T {
         unsafe { &*self.elem.get() }
@@ -348,24 +348,24 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcOnHeap<()>>> {
+    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcBox<()>>> {
         self.next.get()
     }
 
     #[inline]
-    pub(super) fn get_prev(&self) -> *mut Option<NonNull<CcOnHeap<()>>> {
+    pub(super) fn get_prev(&self) -> *mut Option<NonNull<CcBox<()>>> {
         self.prev.get()
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
+unsafe impl<T: ?Sized + Trace + 'static> Trace for CcBox<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
         self.get_elem().trace(ctx);
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> Finalize for CcBox<T> {
     #[inline(always)]
     fn finalize(&self) {
         self.get_elem().finalize();
@@ -373,7 +373,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
 }
 
 #[inline]
-pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
+pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     // Check if ptr is in possible_cycles list
@@ -392,7 +392,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
         // ptr is not in the list
 
         // Confirm !is_in_possible_cycles() in debug builds.
-        // This is safe to do since we're not putting the CcOnHeap into the list
+        // This is safe to do since we're not putting the CcBox into the list
         #[cfg(feature = "pedantic-debug-assertions")]
         debug_assert! {
             POSSIBLE_CYCLES.try_with(|pc| {
@@ -403,7 +403,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
 }
 
 #[inline]
-pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
+pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
@@ -428,18 +428,18 @@ pub(crate) fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
         }
         // Add to the list
         //
-        // Make sure this operation is the first after the if-else, since the CcOnHeap is in
+        // Make sure this operation is the first after the if-else, since the CcBox is in
         // an invalid state now (it's marked Mark::PossibleCycles, but it isn't into the list)
         list.add(ptr);
     });
 }
 
-// Functions in common between every CcOnHeap<_>
-impl CcOnHeap<()> {
+// Functions in common between every CcBox<_>
+impl CcBox<()> {
     #[inline]
     pub(super) fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         unsafe {
-            CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
+            CcBox::get_traceable(ptr).as_ref().trace(ctx);
         }
     }
 
@@ -451,7 +451,7 @@ impl CcOnHeap<()> {
                 // Set finalized
                 ptr.as_ref().counter_marker().set_finalized(true);
 
-                CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
+                CcBox::get_traceable(ptr).as_ref().finalize_elem();
                 true
             } else {
                 false
@@ -462,7 +462,7 @@ impl CcOnHeap<()> {
     /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        CcOnHeap::get_traceable(ptr).as_mut().drop_elem();
+        CcBox::get_traceable(ptr).as_mut().drop_elem();
     }
 
     #[inline]
@@ -505,17 +505,17 @@ impl CcOnHeap<()> {
         // ptr is surely to trace
         //
         // This function is called from collect_cycles(), which doesn't know the
-        // exact type of the element inside CcOnHeap, so trace it using the vtable
-        CcOnHeap::trace_inner(ptr, ctx);
+        // exact type of the element inside CcBox, so trace it using the vtable
+        CcBox::trace_inner(ptr, ctx);
     }
 
     /// Returns whether `ptr.elem` should be traced.
     ///
-    /// This function returns a `bool` instead of directly tracing the element inside the CcOnHeap, since this way
+    /// This function returns a `bool` instead of directly tracing the element inside the CcBox, since this way
     /// we can avoid using the vtable most of the times (the responsibility of tracing the inner element is passed
-    /// to the caller, which *might* have more information on the type inside CcOnHeap than us).
+    /// to the caller, which *might* have more information on the type inside CcBox than us).
     #[inline(never)] // Don't inline this function, it's huge
-    #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
+    #[must_use = "the element inside ptr is not traced by CcBox::trace"]
     fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         #[inline(always)]
         fn non_root(counter_marker: &CounterMarker) -> bool {
@@ -574,7 +574,7 @@ impl CcOnHeap<()> {
             ContextInner::RootTracing { non_root_list, root_list } => {
                 if counter_marker.is_traced() {
                     // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
-                    // NonMarked will avoid tracing this CcOnHeap again (thanks to the if condition)
+                    // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
                     counter_marker.mark(Mark::NonMarked);
 
                     if non_root(counter_marker) {
@@ -594,8 +594,8 @@ impl CcOnHeap<()> {
     }
 }
 
-// Trait used to make it possible to drop/finalize only the elem field of CcOnHeap
-// and without taking a &mut reference to the whole CcOnHeap
+// Trait used to make it possible to drop/finalize only the elem field of CcBox
+// and without taking a &mut reference to the whole CcBox
 trait InternalTrace: Trace {
     fn finalize_elem(&self);
 
@@ -603,7 +603,7 @@ trait InternalTrace: Trace {
     unsafe fn drop_elem(&self);
 }
 
-impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
     fn finalize_elem(&self) {
         self.get_elem().finalize();
     }

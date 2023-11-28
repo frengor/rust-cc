@@ -29,7 +29,7 @@ pub(crate) const MAX: u32 = COUNTER_MASK;
 ///   * `NON_MARKED`
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
 ///   * `TRACED`
-/// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
+/// * `B` is `1` when the element inside `CcBox` has already been finalized, `0` otherwise
 /// * `C` is the tracing counter
 /// * `D` is the counter (last one for sum/subtraction efficiency)
 #[derive(Clone, Debug)]

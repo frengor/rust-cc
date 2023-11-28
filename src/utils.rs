@@ -1,13 +1,13 @@
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use core::ptr::NonNull;
 
-use crate::{CcOnHeap, Trace};
+use crate::{CcBox, Trace};
 use crate::state::State;
 
 #[inline]
-pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State) -> NonNull<CcOnHeap<T>> {
+pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State) -> NonNull<CcBox<T>> {
     state.record_allocation(layout);
-    match NonNull::new(alloc(layout) as *mut CcOnHeap<T>) {
+    match NonNull::new(alloc(layout) as *mut CcBox<T>) {
         Some(ptr) => ptr,
         None => handle_alloc_error(layout),
     }
@@ -15,7 +15,7 @@ pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State)
 
 #[inline]
 pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
-    ptr: NonNull<CcOnHeap<T>>,
+    ptr: NonNull<CcBox<T>>,
     layout: Layout,
     state: &State
 ) {
