@@ -114,7 +114,7 @@ impl Config {
         if state.allocated_bytes() >= self.bytes_threshold {
 
             loop {
-                let Some(new_threshold) = self.bytes_threshold.checked_mul(2) else { break; };
+                let Some(new_threshold) = self.bytes_threshold.checked_shl(1) else { break; };
                 self.bytes_threshold = new_threshold;
                 if state.allocated_bytes() < self.bytes_threshold {
                     break;
@@ -126,22 +126,24 @@ impl Config {
 
         // Second case: the threshold might have to be decreased
         let allocated = state.allocated_bytes() as f64;
-        let mut bytes_threshold = self.bytes_threshold;
 
         // If adjustment_percent or the result of the multiplication is 0 do nothing
-        if ((bytes_threshold as f64) * self.adjustment_percent) == 0.0 {
+        if ((self.bytes_threshold as f64) * self.adjustment_percent) == 0.0 {
             return;
         }
 
         // No more cases after this, there's no need to use an additional if as above
-        while allocated <= ((bytes_threshold as f64) * self.adjustment_percent) {
-            bytes_threshold <<= 1;
-            if bytes_threshold <= DEFAULT_BYTES_THRESHOLD {
-                self.bytes_threshold = DEFAULT_BYTES_THRESHOLD;
-                return;
+        while allocated <= ((self.bytes_threshold as f64) * self.adjustment_percent) {
+            let new_threshold = self.bytes_threshold >> 1;
+            if state.allocated_bytes() >= new_threshold {
+                break; // If the shift produces a threshold <= allocated, then don't update bytes_threshold to maintain the invariant
             }
+            if new_threshold <= DEFAULT_BYTES_THRESHOLD {
+                self.bytes_threshold = DEFAULT_BYTES_THRESHOLD;
+                break;
+            }
+            self.bytes_threshold = new_threshold;
         }
-        self.bytes_threshold = bytes_threshold;
     }
 }
 
