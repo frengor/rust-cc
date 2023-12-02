@@ -49,7 +49,7 @@ impl Config {
     const fn new() -> Self {
         Self {
             bytes_threshold: DEFAULT_BYTES_THRESHOLD,
-            adjustment_percent: 0.25,
+            adjustment_percent: 0.1,
             buffered_threshold: None,
             auto_collect: true,
         }
