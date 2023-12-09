@@ -173,7 +173,7 @@ fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
 
                 has_finalized = non_root_list.iter().fold(false, |has_finalized, ptr| {
                     non_root_list_size += 1;
-                    CcBox::finalize_inner(ptr.cast()) | has_finalized
+                    CcBox::finalize_inner(ptr.cast()) || has_finalized
                 });
 
                 // _finalizing_guard is dropped here, resetting state.finalizing
