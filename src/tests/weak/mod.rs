@@ -254,7 +254,7 @@ fn try_upgrade_in_finalize_and_drop() {
     impl Finalize for Cyclic {
         fn finalize(&self) {
             FINALIZED.with(|finalized| finalized.set(true));
-            assert!(self.weak.upgrade().is_none());
+            assert!(self.weak.upgrade().is_some());
         }
     }
 
@@ -286,6 +286,53 @@ fn try_upgrade_in_finalize_and_drop() {
     assert!(DROPPED.with(|dropped| dropped.get()));
 }
 
+#[cfg(feature = "finalization")]
+#[test]
+fn try_upgrade_and_resurrect_in_finalize_and_drop() {
+    reset_state();
+
+    thread_local! {
+        static RESURRECTED: Cell<Option<WeakableCc<Cyclic>>> = Cell::new(None);
+    }
+
+    struct Cyclic {
+        weak: Weak<Cyclic>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.weak.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            RESURRECTED.with(|r| r.set(Some(self.weak.upgrade().unwrap())));
+        }
+    }
+
+    impl Drop for Cyclic {
+        fn drop(&mut self) {
+            assert!(self.weak.upgrade().is_none());
+        }
+    }
+
+    {
+        let cc = Cc::new_cyclic(|weak| Cyclic {
+            weak: weak.clone(),
+        });
+        assert_eq!(1, cc.strong_count());
+        // cc is dropped and collected automatically
+    }
+
+    RESURRECTED.with(|r| {
+        let cc = r.replace(None).unwrap();
+        assert_eq!(1, cc.weak_count());
+        assert_eq!(1, cc.strong_count());
+        // cc is dropped here, finally freeing the allocation
+    });
+}
+
 #[test]
 fn try_upgrade_in_cyclic_finalize_and_drop() {
     reset_state();
@@ -312,7 +359,7 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
     impl Finalize for Cyclic {
         fn finalize(&self) {
             FINALIZED.with(|finalized| finalized.set(true));
-            assert!(self.weak.upgrade().is_some()); // In cyclic the strong_count is > 0, so the weak can be upgraded
+            assert!(self.weak.upgrade().is_some());
         }
     }
 

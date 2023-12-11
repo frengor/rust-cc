@@ -119,11 +119,13 @@ impl CounterMarker {
         (self.counter.get() & BITS_MASK) == IN_POSSIBLE_CYCLES
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn needs_finalization(&self) -> bool {
         (self.counter.get() & FINALIZED_MASK) == 0u32
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn set_finalized(&self, finalized: bool) {
         if finalized {

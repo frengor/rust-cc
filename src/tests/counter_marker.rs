@@ -15,6 +15,7 @@ fn test_new() {
     test(CounterMarker::new_with_counter_to_one(false));
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_is_to_finalize() {
     let counter = CounterMarker::new_with_counter_to_one(false);

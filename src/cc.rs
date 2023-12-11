@@ -196,54 +196,71 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
-        // Always decrement the counter
-        let res = self.counter_marker().decrement_counter();
-        debug_assert!(res.is_ok());
+        #[inline]
+        fn decrement_counter<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+            // Always decrement the counter
+            let res = cc.counter_marker().decrement_counter();
+            debug_assert!(res.is_ok());
+        }
+
+        #[inline]
+        fn handle_possible_cycle<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+            decrement_counter(cc);
+
+            // We know that we're not part of either root_list or non_root_list, since the cc isn't traced
+            add_to_list(cc.inner.cast());
+        }
 
         // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
-        // In this case, no further action has to be taken, since the counter has been already decremented.
+        // In this case, no further action has to be taken, except decrementing the reference counter.
         if self.counter_marker().is_traced() {
+            decrement_counter(self);
             return;
         }
 
-        if self.counter_marker().counter() == 0 {
+        if self.counter_marker().counter() == 1 {
             // Only us have a pointer to this allocation, deallocate!
 
-            remove_from_list(self.inner.cast());
-
             state(|state| {
-                let to_drop = if cfg!(feature = "finalization") && self.counter_marker().needs_finalization() {
-                    // This cfg is necessary since the cfg! above still compiles the line below,
-                    // however state doesn't contain the finalizing field when the finalization feature is off,
-                    // so removing this cfg makes the crate to fail compilation
-                    #[cfg(feature = "finalization")]
+                #[cfg(feature = "finalization")]
+                if self.counter_marker().needs_finalization() {
                     let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
                     // Set finalized
                     self.counter_marker().set_finalized(true);
 
                     self.inner().get_elem().finalize();
-                    self.counter_marker().counter() == 0
-                    // _finalizing_guard is dropped here, resetting state.finalizing
-                } else {
-                    true
-                };
 
-                if to_drop {
-                    let _dropping_guard = replace_state_field!(dropping, true, state);
-                    let layout = self.inner().layout();
-
-                    // SAFETY: we're the only one to have a pointer to this allocation
-                    unsafe {
-                        drop_in_place(self.inner().get_elem_mut());
-                        cc_dealloc(self.inner, layout, state);
+                    if self.counter_marker().counter() != 1 {
+                        // The object has been resurrected
+                        handle_possible_cycle(self);
+                        return;
                     }
-                    // _dropping_guard is dropped here, resetting state.dropping
+                    // _finalizing_guard is dropped here, resetting state.finalizing
                 }
+
+                decrement_counter(self);
+                remove_from_list(self.inner.cast());
+
+                let _dropping_guard = replace_state_field!(dropping, true, state);
+                let layout = self.inner().layout();
+
+                // SAFETY: we're the only one to have a pointer to this allocation
+                unsafe {
+                    drop_in_place(self.inner().get_elem_mut());
+
+                    #[cfg(feature = "pedantic-debug-assertions")]
+                    debug_assert_eq!(
+                        0, self.counter_marker().counter(),
+                        "Trying to deallocate a CcBox with a reference counter > 0"
+                    );
+
+                    cc_dealloc(self.inner, layout, state);
+                }
+                // _dropping_guard is dropped here, resetting state.dropping
             });
         } else {
-            // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
-            add_to_list(self.inner.cast());
+            handle_possible_cycle(self);
         }
     }
 }

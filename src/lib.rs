@@ -248,6 +248,12 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
     let to_deallocate_list = ManuallyDrop::new(to_deallocate_list);
 
     to_deallocate_list.iter().for_each(|ptr| {
+        #[cfg(feature = "pedantic-debug-assertions")]
+        debug_assert_eq!(
+            0, unsafe { ptr.as_ref().counter_marker().counter() },
+            "Trying to deallocate a CcBox with a reference counter > 0"
+        );
+
         // SAFETY: ptr.as_ref().elem is never read or written (only the layout information is read)
         //         and then the allocation gets deallocated immediately after.
         unsafe {
