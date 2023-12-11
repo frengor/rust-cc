@@ -84,6 +84,94 @@ impl<T: Trace + 'static> Cc<T> {
             t
         }
     }
+
+    /// This function allows to obtain a [`Cc`] to the `self` argument of [`Finalize::finalize`]
+    /// when it is known it was allocated using [`Cc::new`].
+    ///
+    /// The main reason for this function's existence is to be used to implement virtual machines,
+    /// since usually the finalization function of garbage collected languages takes a strong reference
+    /// (so a [`Cc`] in the virtual machine). An example is Java's `Object.finalize()` method, which
+    /// needs a reference to the `this` object to be called.
+    ///
+    /// # Safety
+    /// The reference provided to this function must come from the `self` argument of [`Finalize::finalize`]
+    /// and the object it points to must have been provided as the argument of [`Cc::new`].
+    ///
+    /// # Panics
+    /// This function panics if the reference count of the provided object is already maximum, since it gets incremented.
+    ///
+    /// # Examples
+    /// ```rust
+    ///# use std::ptr;
+    ///# use rust_cc::*;
+    ///# use std::ops::Deref;
+    /// struct AllocatedStruct {
+    ///     // ...
+    ///#    field: u32,
+    /// }
+    ///
+    /// unsafe impl Trace for AllocatedStruct {
+    ///     // ...
+    ///#    fn trace(&self, ctx: &mut Context<'_>) {
+    ///#        self.field.trace(ctx);
+    ///#    }
+    /// }
+    ///
+    /// impl Finalize for AllocatedStruct {
+    ///     fn finalize(&self) {
+    ///         // SAFETY: In this example, this finalize method can only be called
+    ///         //         on the AllocatedStruct allocated below using Cc::new
+    ///         let cc = unsafe { Cc::finalization_from_inner(self) };
+    ///         assert!(ptr::eq(self, cc.deref()));
+    ///#        assert_eq!(5, self.field);
+    ///#        assert_eq!(5, cc.field);
+    ///
+    ///         // Now an example of things which are undefined behavior:
+    ///
+    ///         let another_struct = AllocatedStruct {
+    ///             // ...
+    ///#            field: 1,
+    ///         };
+    ///
+    ///         let cc_allocated = Cc::new(0u32);
+    ///         let cc_allocated_ref: &u32 = cc_allocated.deref();
+    ///
+    ///         // Both the followings are undefined behavior! ⚠️
+    ///         // let ub = unsafe { Cc::finalization_from_inner(&another_struct) };
+    ///         // let ub = unsafe { Cc::finalization_from_inner(cc_allocated_ref) };
+    ///     }
+    /// }
+    ///
+    /// let cc = Cc::new(AllocatedStruct {
+    ///     // ...
+    ///#    field: 5,
+    /// });
+    ///
+    /// assert_eq!(1, cc.strong_count());
+    /// drop(cc); // This finalizes and deallocates the allocated AllocatedStruct
+    /// ```
+    #[cfg(feature = "finalization")]
+    #[inline]
+    #[track_caller]
+    pub unsafe fn finalization_from_inner(inner: &T) -> Cc<T> {
+        debug_assert!(
+            state(|state| state.is_finalizing()),
+            "Cc::finalization_from_inner can be used soundly only during finalization"
+        );
+
+        let offset = memoffset::offset_of!(CcBox<T>, elem);
+        let ptr = inner as *const T as usize;
+        let ptr = ptr - offset;
+        // SAFETY: CcBox is repr(C) and inner comes from a CcBox.elem field, so ptr is now
+        //         pointing to the first byte of the allocated CcBox. Thus, ptr is != 0
+        let ptr = unsafe { NonNull::new_unchecked(ptr as *mut CcBox<T>) };
+
+        if unsafe { ptr.as_ref() }.counter_marker().increment_counter().is_err() {
+            panic!("Too many references has been created to a single Cc");
+        }
+
+        Cc::__new_internal(ptr)
+    }
 }
 
 impl<T: ?Sized + Trace + 'static> Cc<T> {
@@ -143,7 +231,6 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.inner
     }
 
-    #[cfg(feature = "weak-ptr")] // Currently used only here
     #[inline(always)]
     #[must_use]
     pub(crate) fn __new_internal(inner: NonNull<CcBox<T>>) -> Cc<T> {
@@ -229,6 +316,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                     // Set finalized
                     self.counter_marker().set_finalized(true);
 
+                    let _ = self.inner.as_ptr() as *const () as usize; // Hack around provenance needed by finalization_from_inner
                     self.inner().get_elem().finalize();
 
                     if self.counter_marker().counter() != 1 {
@@ -468,6 +556,7 @@ impl CcBox<()> {
                 // Set finalized
                 ptr.as_ref().counter_marker().set_finalized(true);
 
+                let _ = ptr.as_ptr() as *const () as usize; // Hack around provenance needed by finalization_from_inner
                 CcBox::get_traceable(ptr).as_ref().finalize_elem();
                 true
             } else {
