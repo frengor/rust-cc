@@ -52,7 +52,7 @@ pub trait Finalize {
 ///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory), but it's safe.
 ///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
 ///   * The [`trace`] function *must not* create a new [`Cc`].
-///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move or access any [`Cc`].
+///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move, create or access any [`Cc`].
 ///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
 ///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
 ///     since it always emits an empty [`Drop`] implementation for the implementing struct.
