@@ -42,6 +42,31 @@ fn test_is_to_finalize() {
 }
 
 #[test]
+fn test_is_dropped() {
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    counter.set_dropped(true);
+    assert!(counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    counter.set_dropped(false);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_dropped(true);
+    assert!(counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_dropped(false);
+    assert!(!counter.is_dropped());
+}
+
+#[test]
 fn test_increment_decrement() {
     fn test(counter: CounterMarker) {
         fn assert_not_marked(counter: &CounterMarker) {
