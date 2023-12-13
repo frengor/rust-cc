@@ -10,7 +10,7 @@ use core::cell::Cell;
 use core::mem::MaybeUninit;
 
 use crate::cc::CcBox;
-use crate::state::{state, try_state};
+use crate::state::try_state;
 use crate::{Cc, Context, Finalize, Trace};
 use crate::utils::{alloc_other, cc_dealloc, dealloc_other};
 use crate::weak::weak_metadata::WeakMetadata;
@@ -38,7 +38,7 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
     #[track_caller]
     pub fn upgrade(&self) -> Option<Cc<Weakable<T>>> {
         #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
+        if crate::state::state(|state| state.is_tracing()) {
             panic!("Cannot upgrade while tracing!");
         }
 
@@ -104,7 +104,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
     #[track_caller]
     fn clone(&self) -> Self {
         #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
+        if crate::state::state(|state| state.is_tracing()) {
             panic!("Cannot clone while tracing!");
         }
 
@@ -176,14 +176,11 @@ fn alloc_metadata(metadata: WeakMetadata) -> NonNull<WeakMetadata> {
 impl<T: ?Sized + Trace + 'static> Weakable<T> {
     #[inline]
     fn init_get_metadata(&self) -> NonNull<WeakMetadata> {
-        match self.metadata.get() {
-            Some(ptr) => ptr,
-            None => {
-                let ptr = alloc_metadata(WeakMetadata::new(true));
-                self.metadata.set(Some(ptr));
-                ptr
-            }
-        }
+        self.metadata.get().unwrap_or_else(|| {
+            let ptr = alloc_metadata(WeakMetadata::new(true));
+            self.metadata.set(Some(ptr));
+            ptr
+        })
     }
 
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
@@ -207,7 +204,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
         F: FnOnce(&Weak<T>) -> T,
     {
         #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
+        if crate::state::state(|state| state.is_tracing()) {
             panic!("Cannot create a new Cc while tracing!");
         }
 
@@ -290,7 +287,7 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
     #[track_caller]
     pub fn downgrade(&self) -> Weak<T> {
         #[cfg(debug_assertions)]
-        if state(|state| state.is_tracing()) {
+        if crate::state::state(|state| state.is_tracing()) {
             panic!("Cannot downgrade while tracing!");
         }
 
