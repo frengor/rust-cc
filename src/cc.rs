@@ -245,6 +245,13 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 let _dropping_guard = replace_state_field!(dropping, true, state);
                 let layout = self.inner().layout();
 
+                // Set the object as dropped before dropping and deallocating it
+                // This feature is used only in weak pointers, so do this only if they're enabled
+                #[cfg(feature = "weak-ptr")]
+                {
+                    self.counter_marker().set_dropped(true);
+                }
+
                 // SAFETY: we're the only one to have a pointer to this allocation
                 unsafe {
                     drop_in_place(self.inner().get_elem_mut());

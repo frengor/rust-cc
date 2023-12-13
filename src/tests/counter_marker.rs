@@ -41,6 +41,7 @@ fn test_is_to_finalize() {
     assert!(counter.needs_finalization());
 }
 
+#[cfg(feature = "weak-ptr")]
 #[test]
 fn test_is_dropped() {
     let counter = CounterMarker::new_with_counter_to_one(false);

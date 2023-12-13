@@ -14,6 +14,7 @@ use core::cell::RefCell;
 use core::mem;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
+use core::ops::{Deref, DerefMut};
 
 use crate::cc::CcBox;
 use crate::counter_marker::Mark;
@@ -228,13 +229,65 @@ fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcBox<()>
 
 #[inline]
 fn deallocate_list(to_deallocate_list: List, state: &State) {
+    /// Just a wrapper used to handle the dropping of to_deallocate_list.
+    /// When dropped, the objects inside are set as dropped
+    struct ToDropList {
+        list: ManuallyDrop<List>,
+    }
+
+    impl Deref for ToDropList {
+        type Target = List;
+
+        #[inline(always)]
+        fn deref(&self) -> &Self::Target {
+            &self.list
+        }
+    }
+
+    impl DerefMut for ToDropList {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.list
+        }
+    }
+
+    impl Drop for ToDropList {
+        #[inline]
+        fn drop(&mut self) {
+            // Remove the remaining elements from the list, setting them as dropped
+            // This feature is used only in weak pointers, so do this only if they're enabled
+            #[cfg(feature = "weak-ptr")]
+            while let Some(ptr) = self.list.remove_first() {
+                unsafe { ptr.as_ref() }.counter_marker().set_dropped(true);
+            }
+
+            // If not using weak pointers, just call the list's drop implementation
+            #[cfg(not(feature = "weak-ptr"))]
+            unsafe {
+                ManuallyDrop::drop(&mut self.list);
+            }
+        }
+    }
+
     let _dropping_guard = replace_state_field!(dropping, true, state);
+
+    // Redefine to_deallocate_list with the ToDropList wrapper
+    let to_deallocate_list = ToDropList {
+        list: ManuallyDrop::new(to_deallocate_list),
+    };
 
     // Drop every CcBox before deallocating them (see comment below)
     to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr is valid to access and drop in place
         unsafe {
             debug_assert!(ptr.as_ref().counter_marker().is_traced());
+
+            // Set the object as dropped before dropping it
+            // This feature is used only in weak pointers, so do this only if they're enabled
+            #[cfg(feature = "weak-ptr")]
+            {
+                ptr.as_ref().counter_marker().set_dropped(true);
+            }
 
             CcBox::drop_inner(ptr.cast());
         };

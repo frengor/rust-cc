@@ -133,16 +133,19 @@ impl CounterMarker {
         self.set_bit(finalized, FINALIZED_MASK);
     }
 
+    #[cfg(feature = "weak-ptr")]
     #[inline]
     pub(crate) fn is_dropped(&self) -> bool {
         (self.counter.get() & DROPPED_MASK) == DROPPED_MASK
     }
 
+    #[cfg(feature = "weak-ptr")]
     #[inline]
     pub(crate) fn set_dropped(&self, dropped: bool) {
         self.set_bit(dropped, DROPPED_MASK);
     }
 
+    #[cfg(any(feature = "weak-ptr", feature = "finalization"))]
     #[inline(always)]
     fn set_bit(&self, value: bool, mask: u32) {
         if value {
