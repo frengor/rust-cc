@@ -15,16 +15,13 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - name: Run tests
         # Keep "std" feature always enabled on stable to avoid needing the no-std related nightly features
-        # Also don't use --workspace (but run two commands) since rust-cc-derive hasn't a "std" feature
         run: |
-          cargo hack test --feature-powerset --skip nightly --verbose -F std
-          cargo hack test --feature-powerset --skip nightly --verbose --manifest-path derive/Cargo.toml
+          cargo hack test --feature-powerset --ignore-unknown-features --workspace --skip nightly --verbose -F std
   on-nightly:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-hack
-      # No need to use --workspace here, since there's no nightly feature in rust-cc-derive
       - name: Run tests
-        run: cargo hack test --feature-powerset --verbose -F nightly
+        run: cargo hack test --feature-powerset --ignore-unknown-features --workspace --verbose -F nightly
