@@ -151,9 +151,8 @@ fn derive_finalize_trait(mut s: Structure<'_>) -> proc_macro2::TokenStream {
     s.add_bounds(AddBounds::None); // Don't generate bounds for Finalize
     s.gen_impl(quote! {
         extern crate rust_cc;
-        use rust_cc::Finalize as __rust_cc__Finalize__;
 
-        gen impl __rust_cc__Finalize__ for @Self {
+        gen impl rust_cc::Finalize for @Self {
         }
     })
 }
