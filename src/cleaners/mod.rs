@@ -49,16 +49,11 @@ impl Cleaner {
 
     #[inline]
     pub fn register(&self, cleaner: impl FnOnce() + 'static) -> Cleanable {
-        let map_key = {
-            let map = &mut *self.cleaner_map.map.borrow_mut();
-
-            if map.is_none() {
-                *map = Some(SlotMap::with_capacity_and_key(3));
-            }
-
-            // The unwrap should never fail and should be optimized out by the compiler
-            map.as_mut().unwrap().insert(CleanerFn(Some(Box::new(cleaner))))
-        };
+        let map_key = self.cleaner_map
+            .map
+            .borrow_mut()
+            .get_or_insert_with(|| SlotMap::with_capacity_and_key(3))
+            .insert(CleanerFn(Some(Box::new(cleaner))));
 
         Cleanable {
             cleaner_map: self.cleaner_map.downgrade(),
