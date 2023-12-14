@@ -1,5 +1,7 @@
 use alloc::alloc::Layout;
+use alloc::rc::Rc;
 use core::cell::Cell;
+use core::marker::PhantomData;
 use thiserror::Error;
 use crate::utils;
 
@@ -48,6 +50,8 @@ pub(crate) struct State {
     dropping: Cell<bool>,
     allocated_bytes: Cell<usize>,
     executions_counter: Cell<usize>,
+
+    _phantom: PhantomData<Rc<()>>, // Make State !Send and !Sync
 }
 
 impl State {
@@ -62,6 +66,8 @@ impl State {
             dropping: Cell::new(false),
             allocated_bytes: Cell::new(0),
             executions_counter: Cell::new(0),
+
+            _phantom: PhantomData,
         }
     }
 

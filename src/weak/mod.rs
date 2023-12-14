@@ -1,3 +1,4 @@
+use alloc::rc::Rc;
 use core::ops::Deref;
 use core::{mem, ptr};
 use core::ptr::{drop_in_place, NonNull};
@@ -8,6 +9,7 @@ use core::{
 };
 use core::cell::Cell;
 use core::mem::MaybeUninit;
+use core::marker::PhantomData;
 
 use crate::cc::CcBox;
 use crate::state::try_state;
@@ -22,6 +24,7 @@ pub type WeakableCc<T> = Cc<Weakable<T>>;
 pub struct Weak<T: ?Sized + Trace + 'static> {
     metadata: NonNull<WeakMetadata>,
     cc: NonNull<CcBox<Weakable<T>>>,
+    _phantom: PhantomData<Rc<T>>, // Make Weak !Send and !Sync
 }
 
 #[cfg(feature = "nightly")]
@@ -115,6 +118,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
         Weak {
             metadata: self.metadata,
             cc: self.cc,
+            _phantom: PhantomData,
         }
     }
 }
@@ -147,6 +151,7 @@ impl<T: ?Sized + Trace + 'static> Finalize for Weak<T> {
 
 pub struct Weakable<T: ?Sized + Trace + 'static> {
     metadata: Cell<Option<NonNull<WeakMetadata>>>, // the Option is used to avoid allocating until a Weak is created
+    _phantom: PhantomData<Rc<()>>, // Make Weakable !Send and !Sync
     elem: T,
 }
 
@@ -156,6 +161,7 @@ impl<T: Trace + 'static> Weakable<T> {
     pub fn new(t: T) -> Weakable<T> {
         Weakable {
             metadata: Cell::new(None),
+            _phantom: PhantomData,
             elem: t,
         }
     }
@@ -235,6 +241,7 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
         let weak: Weak<T> = Weak {
             metadata,
             cc: invalid_cc.cast(), // This cast is correct since NewCyclicWrapper is repr(transparent) and contains a MaybeUninit<T>
+            _phantom: PhantomData,
         };
 
         // Panic guard to deallocate the metadata and the CcBox if the provided function f panics
@@ -302,6 +309,7 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
         Weak {
             metadata,
             cc: self.inner_ptr(),
+            _phantom: PhantomData,
         }
     }
 

@@ -1,5 +1,7 @@
+use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::num::NonZeroUsize;
+use core::marker::PhantomData;
 
 use thiserror::Error;
 use crate::list::CountedList;
@@ -42,6 +44,7 @@ pub struct Config {
     adjustment_percent: f64,
     buffered_threshold: Option<NonZeroUsize>,
     auto_collect: bool,
+    _phantom: PhantomData<Rc<()>>, // Make Config !Send and !Sync
 }
 
 impl Config {
@@ -52,6 +55,7 @@ impl Config {
             adjustment_percent: 0.1,
             buffered_threshold: None,
             auto_collect: true,
+            _phantom: PhantomData,
         }
     }
 
