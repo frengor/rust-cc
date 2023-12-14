@@ -15,7 +15,7 @@ struct CleanerMap {
 }
 
 unsafe impl Trace for CleanerMap {
-    #[inline]
+    #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {
     }
 }
@@ -70,20 +70,10 @@ impl Cleaner {
 unsafe impl Trace for Cleaner {
     #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {
-        // DO NOT TRACE self.cleaner_map, It would be unsound!
+        // DO NOT TRACE self.cleaner_map, it would be unsound!
         // If self.cleaner_map would be traced here, it would be possible to have cleaners called
-        // with a reference to the cleaned object accessible inside the clean function.
+        // with a reference to the cleaned object accessible from inside the clean function.
         // This would be unsound, since cleaners are called from the Drop implementation of Ccs (see the Trace trait safety section)
-        // For example, thw following would work:
-        // struct RegisteredCleaner {
-        //     cyclic: Cc<CcObjectToClean>,
-        // }
-        // impl RegisteredCleaner for Clean {
-        //     fn clean(&mut self) {
-        //         self.cyclic is accessible here!
-        //     }
-        // }
-        // Without tracing self.cleaner_map, the Cc<CcObjectToClean> will simply be leaked.
     }
 }
 
@@ -104,7 +94,7 @@ impl Cleanable {
         // (the latter shouldn't happen, but better be sure)
         let Ok(mut ref_mut) = cc.map.try_borrow_mut() else { return };
         let Some(map) = &mut *ref_mut else { return };
-        map.remove(self.key);
+        let _ = map.remove(self.key);
     }
 }
 
