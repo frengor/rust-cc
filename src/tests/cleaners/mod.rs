@@ -221,3 +221,27 @@ fn panic_on_clean() {
 
     assert!(already_cleaned.get());
 }
+
+#[test]
+fn clean_multiple_times() {
+    reset_state();
+
+    let rc = Rc::new(Cell::new(false));
+
+    let cleaner = Cleaner::new();
+
+    let cleanable = cleaner.register({
+        let rc = rc.clone();
+        move || {
+            assert!(!rc.replace(true));
+        }
+    });
+
+    cleanable.clean();
+
+    assert!(rc.get());
+
+    cleanable.clean();
+
+    assert!(rc.get());
+}

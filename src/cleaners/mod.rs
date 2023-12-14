@@ -86,7 +86,7 @@ pub struct Cleanable {
 
 impl Cleanable {
     #[inline]
-    pub fn clean(self) {
+    pub fn clean(&self) {
         // Try upgrading to see if the CleanerMap hasn't been deallocated
         let Some(cc) = self.cleaner_map.upgrade() else { return };
 
