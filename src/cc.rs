@@ -621,6 +621,7 @@ impl CcBox<()> {
 // Trait used to make it possible to drop/finalize only the elem field of CcBox
 // and without taking a &mut reference to the whole CcBox
 trait InternalTrace: Trace {
+    #[cfg(feature = "finalization")]
     fn finalize_elem(&self);
 
     /// Safety: see `drop_in_place`
@@ -628,6 +629,7 @@ trait InternalTrace: Trace {
 }
 
 impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
+    #[cfg(feature = "finalization")]
     fn finalize_elem(&self) {
         self.get_elem().finalize();
     }
