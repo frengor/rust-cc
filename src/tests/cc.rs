@@ -148,7 +148,8 @@ fn test_trait_object() {
     struct MyTraitObject(u8);
 
     unsafe impl Trace for MyTraitObject {
-        fn trace(&self, _: &mut Context<'_>) {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.0.trace(ctx);
             TRACED.with(|traced| traced.set(true));
         }
     }
