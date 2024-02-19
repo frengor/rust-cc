@@ -33,7 +33,7 @@ std = ["slotmap?/std", "thiserror/std"]
 pedantic-debug-assertions = []
 
 [dependencies]
-rust-cc-derive = { path = "./derive", version = "0.2.0", optional = true }
+rust-cc-derive = { path = "./derive", version = "=0.2.0", optional = true }
 slotmap = {  version = "1.0", optional = true }
 thiserror = { version = "1.0", package = "thiserror-core", default-features = false }
 
