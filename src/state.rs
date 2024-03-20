@@ -172,6 +172,11 @@ pub fn executions_count() -> Result<usize, StateAccessError> {
     try_state(|state| Ok(state.executions_count()))?
 }
 
+#[inline]
+pub fn is_tracing() -> Result<bool, StateAccessError> {
+    try_state(|state| Ok(state.is_tracing()))?
+}
+
 /// Utility macro used internally to implement drop guards that accesses the state
 macro_rules! replace_state_field {
     (dropping, $value:expr, $state:ident) => {
