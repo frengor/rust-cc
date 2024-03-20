@@ -30,34 +30,32 @@ pub trait Finalize {
 
 /// Trait to trace cycle-collectable objects.
 ///
-/// Implementors should only call the [`trace`] method of every [`Cc`] owned **only** by the implementing struct.
+/// This trait is unsafe to implement, but can be safely derived using the `Trace` derive macro, which calls the [`trace`] method on every field:
+/// ```rust
+///# use rust_cc::*;
+///# #[derive(Finalize)]
+/// #[derive(Trace)]
+/// struct Foo<A: Trace + 'static, B: Trace + 'static> {
+///     a_field: Cc<A>,
+///     another_field: Cc<B>,
+/// }
+/// ```
 ///
-/// This trait is already implemented for common types from the standard lib.
-///
-/// Remember that creating, cloning, or accessing the contents of a [`Cc`] from inside of [`trace`] will produce a panic,
-/// since it is run during cycle collection.
+/// This trait is already implemented for common types from the standard library.
 ///
 /// # Safety
-/// This trait is unsafe *to implement* because it's not possible to check the following invariants:
-///   * The [`trace`] function *should* be called **only once** on every [`Cc`] **owned only** by the implementing struct.
-///
-///     For example, a [`Cc`] inside a [`Box`] (so a `Box<Cc>`) is owned *only* by the implementing struct.
-///     However, a [`Cc`] inside an [`Rc`] (so a `Rc<Cc>`) *isn't* owned *only* by the implementing struct, so it mustn't be traced.
-///
-///     In general, mixing other shared-ownership smart pointers with [`Cc`]s is not possible and will (almost surely) lead to UB.
-///   * If a [`Cc`] is not traced in *any* execution, then it must be skipped in *any other* execution *except* if any user function other
-///     than [`trace`] is called in between. So, for example, two [`trace`] calls with a [`finalize`] call in between may trace different [`Cc`]s.
-///     Note that skipping [`trace`] calls *may* leak memory, but it's better than UB.
-///
-///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory), but it's safe.
-///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
-///   * The [`trace`] function *must not* create a new [`Cc`].
-///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move, create or access any [`Cc`].
-///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
-///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
-///     since it always emits an empty [`Drop`] implementation for the implementing struct.
-///
-/// For some erroneous implementation examples of this trait, see [Erroneous implementation examples](#erroneous-implementation-examples) down below.
+/// The implementation of [`trace`] must uphold the following invariants:
+///   * The [`trace`] implementation can trace every [`Cc`] instance owned *exclusively* by the instance of the implementing type at maximum once.
+///     No other [`Cc`] instance can be traced.
+///   * It's always fine to panic.
+///   * During the same tracing phase, two different [`trace`] calls on the same value must *behave the same*, i.e. they must trace the same
+///     [`Cc`] instances. If a panic happens during the second of such calls but not in the first one, then the [`Cc`] instances traced during
+///     the second call must be a subset of the [`Cc`] instances traced in the first one.  
+///     Tracing can be detected using the [`state::is_tracing`] function. If it never returned `false` between two different [`trace`] calls
+///     on the same value, then they are part of the same tracing phase.
+///   * The [`trace`] implementation must not create, clone, dereference or drop any [`Cc`].
+///   * If the implementing type implements [`Drop`], then the [`Drop`] implementation must not create, clone, move, dereference, drop or call
+///     any method on any [`Cc`] instance.
 ///
 /// # Example
 /// ```rust
@@ -164,9 +162,9 @@ pub trait Finalize {
 /// }
 /// ```
 ///
-/// [interior mutability]: https://doc.rust-lang.org/reference/interior-mutability.html
 /// [`self`]: https://doc.rust-lang.org/std/keyword.self.html
 /// [`trace`]: crate::Trace::trace
+/// [`state::is_tracing`]: crate::state::is_tracing
 /// [`Finalize`]: crate::Finalize
 /// [`finalize`]: crate::Finalize::finalize
 /// [`Cc`]: crate::Cc
