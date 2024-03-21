@@ -31,15 +31,23 @@ pub trait Finalize {
 /// Trait to trace cycle-collectable objects.
 ///
 /// This trait is unsafe to implement, but can be safely derived using the `Trace` derive macro, which calls the [`trace`] method on every field:
-/// ```rust
-///# use rust_cc::*;
-///# #[derive(Finalize)]
-/// #[derive(Trace)]
-/// struct Foo<A: Trace + 'static, B: Trace + 'static> {
-///     a_field: Cc<A>,
-///     another_field: Cc<B>,
-/// }
-/// ```
+#[cfg_attr(
+    feature = "derive",
+    doc = r"```rust"
+)]
+#[cfg_attr(
+    not(feature = "derive"),
+    doc = r"```rust,ignore"
+)]
+#[doc = r"# use rust_cc::*;
+# use rust_cc_derive::*;
+# #[derive(Finalize)]
+#[derive(Trace)]
+struct Foo<A: Trace + 'static, B: Trace + 'static> {
+    a_field: Cc<A>,
+    another_field: Cc<B>,
+}
+```"]
 ///
 /// This trait is already implemented for common types from the standard library.
 ///
