@@ -196,6 +196,11 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
+        #[cfg(debug_assertions)]
+        if state(|state| state.is_tracing()) {
+            panic!("Cannot drop while tracing!");
+        }
+
         #[inline]
         fn decrement_counter<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
             // Always decrement the counter
