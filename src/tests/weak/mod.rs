@@ -148,18 +148,6 @@ fn test_new_cyclic() {
 fn panicking_new_cyclic1() {
     reset_state();
 
-    struct Cyclic {
-        weak: Weak<Cyclic>,
-    }
-
-    unsafe impl Trace for Cyclic {
-        fn trace(&self, ctx: &mut Context<'_>) {
-            self.weak.trace(ctx);
-        }
-    }
-
-    impl Finalize for Cyclic {}
-
     let _cc = Cc::new_cyclic(|_| {
         panic!("Expected panic during panicking_new_cyclic1!");
     });
@@ -169,18 +157,6 @@ fn panicking_new_cyclic1() {
 #[should_panic(expected = "Expected panic during panicking_new_cyclic2!")]
 fn panicking_new_cyclic2() {
     reset_state();
-
-    struct Cyclic {
-        weak: Weak<Cyclic>,
-    }
-
-    unsafe impl Trace for Cyclic {
-        fn trace(&self, ctx: &mut Context<'_>) {
-            self.weak.trace(ctx);
-        }
-    }
-
-    impl Finalize for Cyclic {}
 
     let _cc = Cc::new_cyclic(|weak| {
         let _weak = weak.clone();
