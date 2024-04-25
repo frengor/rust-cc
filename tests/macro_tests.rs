@@ -1,6 +1,7 @@
-#![cfg(feature = "derive")]
+#![cfg(all(not(miri), feature = "derive", not(feature = "nightly")))]
+// No need to run under miri. Also, don't run with the nightly compiler,
+// since error messages might have changed, hence failing the CI
 
-#[cfg(not(miri))]
 #[test]
 fn macro_tests() {
     let t = trybuild::TestCases::new();
