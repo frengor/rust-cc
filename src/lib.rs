@@ -5,6 +5,7 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![allow(clippy::thread_local_initializer_can_be_made_const)]
+#![allow(unexpected_cfgs)]
 
 #[cfg(all(not(feature = "std"), not(feature = "nightly")))]
 compile_error!("Feature \"std\" cannot be disabled without enabling feature \"nightly\" (due to #[thread_local] not being stable).");
