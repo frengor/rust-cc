@@ -31,10 +31,13 @@ impl List {
             next: self.head.clone(),
             previous: RefCell::new(None),
         });
-        if let Node::Cons{ previous, .. } = &*self.head {
+        if let Node::Cons { previous, .. } = &*self.head {
             *previous.borrow_mut() = Some(cons.clone());
         }
         self.head = cons;
+        if let Node::Cons { next, .. } = &*self.head {
+            next.mark_alive();
+        }
     }
 
     fn len(&self) -> usize {
