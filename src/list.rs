@@ -52,15 +52,14 @@ impl ListMethods for List {
             unsafe {
                 *first.as_ref().get_prev() = Some(ptr);
                 *ptr.as_ref().get_next() = Some(*first);
-                *ptr.as_ref().get_prev() = None; // Not really necessary
+                debug_assert!((*ptr.as_ref().get_prev()).is_none());
             }
             *first = ptr;
         } else {
             self.first = Some(ptr);
             unsafe {
-                // Not really necessary
-                *ptr.as_ref().get_next() = None;
-                *ptr.as_ref().get_prev() = None;
+                debug_assert!((*ptr.as_ref().get_next()).is_none());
+                debug_assert!((*ptr.as_ref().get_prev()).is_none());
             }
         }
     }
@@ -73,23 +72,33 @@ impl ListMethods for List {
                     // ptr is in between two elements
                     *next.as_ref().get_prev() = Some(prev);
                     *prev.as_ref().get_next() = Some(next);
+
+                    // Both next and prev are != None
+                    *ptr.as_ref().get_next() = None;
+                    *ptr.as_ref().get_prev() = None;
                 },
                 (Some(next), None) => {
                     // ptr is the first element
                     *next.as_ref().get_prev() = None;
                     self.first = Some(next);
+
+                    // Only next is != None
+                    *ptr.as_ref().get_next() = None;
                 },
                 (None, Some(prev)) => {
                     // ptr is the last element
                     *prev.as_ref().get_next() = None;
+
+                    // Only prev is != None
+                    *ptr.as_ref().get_prev() = None;
                 },
                 (None, None) => {
                     // ptr is the only one in the list
                     self.first = None;
                 },
             }
-            *ptr.as_ref().get_next() = None;
-            *ptr.as_ref().get_prev() = None;
+            debug_assert!((*ptr.as_ref().get_next()).is_none());
+            debug_assert!((*ptr.as_ref().get_prev()).is_none());
         }
     }
 
