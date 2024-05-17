@@ -249,8 +249,8 @@ impl CountedList {
                 prev = elem;
             }
             unsafe {
-                *prev.as_ref().get_next() = to_append.first;
                 if let Some(ptr) = to_append.first {
+                    *prev.as_ref().get_next() = to_append.first;
                     *ptr.as_ref().get_prev() = Some(prev);
                 }
             }
