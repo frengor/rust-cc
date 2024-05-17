@@ -9,6 +9,8 @@ use crate::counter_marker::CounterMarker;
 
 use test_case::{test_case, test_matrix};
 
+// FIXME Properly test `list.last`
+
 fn assert_contains(list: &impl ListMethodsExt, mut elements: Vec<i32>) {
     list.iter().for_each(|ptr| {
         // Test contains
@@ -32,6 +34,14 @@ fn new_list(elements: &[i32], list: &mut impl ListMethodsExt) -> Vec<NonNull<CcB
         .iter()
         .map(|&i| CcBox::new_for_tests(i))
         .inspect(|&ptr| list.add(ptr.cast()))
+        .collect()
+}
+
+fn new_list_last(elements: &[i32], list: &mut impl ListMethodsExt) -> Vec<NonNull<CcBox<i32>>> {
+    elements
+        .iter()
+        .map(|&i| CcBox::new_for_tests(i))
+        .inspect(|&ptr| list.add_last(ptr.cast()))
         .collect()
 }
 
@@ -74,6 +84,7 @@ fn check_list(list: &impl ListMethodsExt) {
 #[test_case(CountedList::new())]
 fn test_new(list: impl ListMethodsExt) {
     assert!(list.first().is_none());
+    assert!(list.last().is_none());
     list.assert_size(0);
 }
 
@@ -83,8 +94,29 @@ fn test_add(mut list: impl ListMethodsExt) {
     let vec: Vec<i32> = vec![0, 1, 2];
 
     assert!(list.first().is_none());
+    assert!(list.last().is_none());
     let elements = new_list(&vec, &mut list);
     assert!(list.first().is_some());
+    assert!(list.last().is_some());
+
+    list.assert_size(vec.len());
+    check_list(&list);
+    assert_contains(&list, vec);
+
+    drop(list);
+    deallocate(elements);
+}
+
+#[test_case(List::new())]
+#[test_case(CountedList::new())]
+fn test_add_last(mut list: impl ListMethodsExt) {
+    let vec: Vec<i32> = vec![0, 1, 2];
+
+    assert!(list.first().is_none());
+    assert!(list.last().is_none());
+    let elements = new_list_last(&vec, &mut list);
+    assert!(list.first().is_some());
+    assert!(list.last().is_some());
 
     list.assert_size(vec.len());
     check_list(&list);

@@ -126,8 +126,9 @@ impl DropChecker {
 }
 
 pub(crate) fn assert_empty() {
-    let list = POSSIBLE_CYCLES.with(|pc| pc.borrow().first());
-    assert!(list.is_none());
+    let (first, last) = POSSIBLE_CYCLES.with(|pc| (pc.borrow().first(), pc.borrow().last()));
+    assert!(first.is_none());
+    assert!(last.is_none());
 }
 
 pub(crate) fn assert_collecting() {

@@ -8,7 +8,13 @@ pub(crate) trait ListMethods: Sized {
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     fn first(&self) -> Option<NonNull<CcBox<()>>>;
 
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn last(&self) -> Option<NonNull<CcBox<()>>>;
+
     fn add(&mut self, ptr: NonNull<CcBox<()>>);
+
+    #[allow(dead_code)]
+    fn add_last(&mut self, ptr: NonNull<CcBox<()>>);
 
     fn remove(&mut self, ptr: NonNull<CcBox<()>>);
 
@@ -30,12 +36,16 @@ pub(crate) trait ListMethods: Sized {
 
 pub(crate) struct List {
     first: Option<NonNull<CcBox<()>>>,
+    last: Option<NonNull<CcBox<()>>>,
 }
 
 impl List {
     #[inline]
     pub(crate) const fn new() -> List {
-        List { first: None }
+        List {
+            first: None,
+            last: None
+        }
     }
 }
 
@@ -44,6 +54,12 @@ impl ListMethods for List {
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     fn first(&self) -> Option<NonNull<CcBox<()>>> {
         self.first
+    }
+
+    #[inline]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn last(&self) -> Option<NonNull<CcBox<()>>> {
+        self.last
     }
 
     #[inline]
@@ -57,6 +73,26 @@ impl ListMethods for List {
             *first = ptr;
         } else {
             self.first = Some(ptr);
+            self.last = Some(ptr);
+            unsafe {
+                debug_assert!((*ptr.as_ref().get_next()).is_none());
+                debug_assert!((*ptr.as_ref().get_prev()).is_none());
+            }
+        }
+    }
+
+    #[inline]
+    fn add_last(&mut self, ptr: NonNull<CcBox<()>>) {
+        if let Some(last) = &mut self.last {
+            unsafe {
+                *last.as_ref().get_next() = Some(ptr);
+                *ptr.as_ref().get_prev() = Some(*last);
+                debug_assert!((*ptr.as_ref().get_next()).is_none());
+            }
+            *last = ptr;
+        } else {
+            self.first = Some(ptr);
+            self.last = Some(ptr);
             unsafe {
                 debug_assert!((*ptr.as_ref().get_next()).is_none());
                 debug_assert!((*ptr.as_ref().get_prev()).is_none());
@@ -88,6 +124,7 @@ impl ListMethods for List {
                 (None, Some(prev)) => {
                     // ptr is the last element
                     *prev.as_ref().get_next() = None;
+                    self.last = Some(prev);
 
                     // Only prev is != None
                     *ptr.as_ref().get_prev() = None;
@@ -95,6 +132,7 @@ impl ListMethods for List {
                 (None, None) => {
                     // ptr is the only one in the list
                     self.first = None;
+                    self.last = None;
                 },
             }
             debug_assert!((*ptr.as_ref().get_next()).is_none());
@@ -109,6 +147,9 @@ impl ListMethods for List {
                 self.first = *first.as_ref().get_next();
                 if let Some(next) = self.first {
                     *next.as_ref().get_prev() = None;
+                } else {
+                    // It's the only element in the list
+                    self.last = None;
                 }
                 *first.as_ref().get_next() = None;
                 // prev is already None since it's the first element
@@ -241,24 +282,25 @@ impl CountedList {
     #[inline]
     #[cfg(feature = "finalization")]
     pub(crate) unsafe fn mark_self_and_append(&mut self, mark: Mark, to_append: List, to_append_size: usize) {
-        if let Some(mut prev) = self.list.first {
-            for elem in self.list.iter() {
-                unsafe {
-                    elem.as_ref().counter_marker().mark(mark);
-                }
-                prev = elem;
+        self.list.iter().for_each(|elem| unsafe {
+            elem.as_ref().counter_marker().mark(mark);
+        });
+        unsafe {
+            match (&mut self.list.last, to_append.first) {
+                (Some(last), Some(to_append_first)) => {
+                    *last.as_ref().get_next() = Some(to_append_first);
+                    *to_append_first.as_ref().get_prev() = Some(*last);
+                    self.size += to_append_size;
+                },
+                (None, Some(_)) => {
+                    self.list.first = to_append.first;
+                    self.list.last = to_append.last;
+                    self.size = to_append_size;
+                },
+                (_, _) => {},
             }
-            unsafe {
-                *prev.as_ref().get_next() = to_append.first;
-                if let Some(ptr) = to_append.first {
-                    *ptr.as_ref().get_prev() = Some(prev);
-                }
-            }
-        } else {
-            self.list.first = to_append.first;
-            // to_append.first.prev is already None
         }
-        self.size += to_append_size;
+
         core::mem::forget(to_append); // Don't run to_append destructor
     }
 
@@ -280,9 +322,21 @@ impl ListMethods for CountedList {
     }
 
     #[inline]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
+    fn last(&self) -> Option<NonNull<CcBox<()>>> {
+        self.list.last()
+    }
+
+    #[inline]
     fn add(&mut self, ptr: NonNull<CcBox<()>>) {
         self.size += 1;
         self.list.add(ptr)
+    }
+
+    #[inline]
+    fn add_last(&mut self, ptr: NonNull<CcBox<()>>) {
+        self.size += 1;
+        self.list.add_last(ptr)
     }
 
     #[inline]
