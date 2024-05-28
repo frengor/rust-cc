@@ -50,6 +50,8 @@ fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
     let cc: Cc<Weakable<i32>> = WeakableCc::new_weakable(0i32);
 
     assert!(!cc.deref().has_allocated());
+    assert_eq!(0, cc.weak_count());
+    assert_eq!(1, cc.strong_count());
 
     let cc1 = cc.clone();
 

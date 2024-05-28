@@ -137,6 +137,7 @@ pub(crate) fn assert_collecting() {
 }
 
 pub(crate) fn assert_tracing() {
+    assert!(state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(state.is_tracing());
 
@@ -149,6 +150,7 @@ pub(crate) fn assert_tracing() {
 
 #[cfg(feature = "finalization")]
 pub(crate) fn assert_finalizing() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_tracing());
         assert!(state.is_finalizing());
@@ -157,6 +159,7 @@ pub(crate) fn assert_finalizing() {
 }
 
 pub(crate) fn assert_dropping() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_tracing());
 
@@ -168,6 +171,7 @@ pub(crate) fn assert_dropping() {
 }
 
 pub(crate) fn assert_state_not_collecting() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_collecting());
         assert!(!state.is_tracing());
