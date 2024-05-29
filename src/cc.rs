@@ -14,7 +14,7 @@ use core::{
 
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
-use crate::trace::{Context, ContextInner, Finalize, Trace};
+use crate::trace::{Context, Finalize, Trace};
 use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
@@ -281,7 +281,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if CcBox::trace(self.inner.cast(), ctx) {
+        if (ctx.trace_fn)(self.inner.cast(), ctx) {
             self.inner().get_elem().trace(ctx);
         }
     }
@@ -508,34 +508,28 @@ impl CcBox<()> {
         }
     }
 
-    pub(super) fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+    #[inline(always)]
+    pub(super) fn setup_trace_counting(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
-        match ctx.inner() {
-            ContextInner::Counting { root_list, .. } => {
-                // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
-                // POSSIBLE_CYCLES by rust_cc::collect() (see lib.rs) before calling this function
+        // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
+        // POSSIBLE_CYCLES by rust_cc::collect() (see lib.rs) before calling this function
+        debug_assert!(counter_marker.is_not_marked());
 
-                root_list.add(ptr);
+        ctx.root_list.add(ptr);
 
-                // Reset trace_counter
-                counter_marker.reset_tracing_counter();
+        // Reset trace_counter
+        counter_marker.reset_tracing_counter();
 
-                // Element is surely not already marked, marking
-                counter_marker.mark(Mark::Traced);
-            },
-            ContextInner::RootTracing { .. } => {
-                // ptr is a root
+        // Element is surely not already marked, marking
+        counter_marker.mark(Mark::Traced);
+    }
 
-                // Nothing to do here, ptr is already unmarked
-                debug_assert!(counter_marker.is_not_marked());
-            },
-        }
+    #[inline(always)]
+    pub(super) fn setup_trace_roots(ptr: NonNull<Self>, _: &mut Context<'_>) {
+        // ptr is a root
 
-        // ptr is surely to trace
-        //
-        // This function is called from collect_cycles(), which doesn't know the
-        // exact type of the element inside CcBox, so trace it using the vtable
-        CcBox::trace_inner(ptr, ctx);
+        // Nothing to do here, ptr is already unmarked
+        debug_assert!(unsafe { ptr.as_ref() }.counter_marker().is_not_marked());
     }
 
     /// Returns whether `ptr.elem` should be traced.
@@ -545,81 +539,85 @@ impl CcBox<()> {
     /// to the caller, which *might* have more information on the type inside CcBox than us).
     #[inline(never)] // Don't inline this function, it's huge
     #[must_use = "the element inside ptr is not traced by CcBox::trace"]
-    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
-        #[inline(always)]
-        fn non_root(counter_marker: &CounterMarker) -> bool {
-            counter_marker.tracing_counter() == counter_marker.counter()
-        }
-
+    pub(super) fn trace_cc_box_counting(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
-        match ctx.inner() {
-            ContextInner::Counting {
-                root_list,
-                non_root_list,
-            } => {
-                if !counter_marker.is_traced() {
-                    // Not already marked
 
-                    // Make sure ptr is not in POSSIBLE_CYCLES list
-                    remove_from_list(ptr);
+        if !counter_marker.is_traced() {
+            // Not already marked
 
-                    counter_marker.reset_tracing_counter();
-                    let res = counter_marker.increment_tracing_counter();
-                    debug_assert!(res.is_ok());
+            // Make sure ptr is not in POSSIBLE_CYCLES list
+            remove_from_list(ptr);
 
-                    // Check invariant (tracing_counter is always less or equal to counter)
-                    debug_assert!(counter_marker.tracing_counter() <= counter_marker.counter());
+            counter_marker.reset_tracing_counter();
+            let res = counter_marker.increment_tracing_counter();
+            debug_assert!(res.is_ok());
 
-                    if non_root(counter_marker) {
-                        non_root_list.add(ptr);
-                    } else {
-                        root_list.add(ptr);
-                    }
+            // Check invariant (tracing_counter is always less or equal to counter)
+            debug_assert!(counter_marker.tracing_counter() <= counter_marker.counter());
 
-                    // Marking here since the previous debug_asserts might panic
-                    // before ptr is actually added to root_list or non_root_list
-                    counter_marker.mark(Mark::Traced);
+            if Self::non_root(counter_marker) {
+                ctx.non_root_list.add(ptr);
+            } else {
+                ctx.root_list.add(ptr);
+            }
 
-                    // Continue tracing
-                    true
-                } else {
-                    // Check counters invariant (tracing_counter is always less or equal to counter)
-                    // Only < is used here since tracing_counter will be incremented (by 1)
-                    debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
+            // Marking here since the previous debug_asserts might panic
+            // before ptr is actually added to root_list or non_root_list
+            counter_marker.mark(Mark::Traced);
 
-                    let res = counter_marker.increment_tracing_counter();
-                    debug_assert!(res.is_ok());
+            // Continue tracing
+            true
+        } else {
+            // Check counters invariant (tracing_counter is always less or equal to counter)
+            // Only < is used here since tracing_counter will be incremented (by 1)
+            debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
 
-                    if non_root(counter_marker) {
-                        // Already marked, so ptr was put in root_list
-                        root_list.remove(ptr);
-                        non_root_list.add(ptr);
-                    }
+            let res = counter_marker.increment_tracing_counter();
+            debug_assert!(res.is_ok());
 
-                    // Don't continue tracing
-                    false
-                }
-            },
-            ContextInner::RootTracing { non_root_list, root_list } => {
-                if counter_marker.is_traced() {
-                    // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
-                    // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
-                    counter_marker.mark(Mark::NonMarked);
+            if Self::non_root(counter_marker) {
+                // Already marked, so ptr was put in root_list
+                ctx.root_list.remove(ptr);
+                ctx.non_root_list.add(ptr);
+            }
 
-                    if non_root(counter_marker) {
-                        non_root_list.remove(ptr);
-                    } else {
-                        root_list.remove(ptr);
-                    }
-
-                    // Continue root tracing
-                    true
-                } else {
-                    // Don't continue tracing
-                    false
-                }
-            },
+            // Don't continue tracing
+            false
         }
+    }
+
+    /// Returns whether `ptr.elem` should be traced.
+    ///
+    /// This function returns a `bool` instead of directly tracing the element inside the CcBox, since this way
+    /// we can avoid using the vtable most of the times (the responsibility of tracing the inner element is passed
+    /// to the caller, which *might* have more information on the type inside CcBox than us).
+    #[inline(never)] // Don't inline this function, it's huge
+    #[must_use = "the element inside ptr is not traced by CcBox::trace"]
+    pub(super) fn trace_cc_box_roots(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
+
+        if counter_marker.is_traced() {
+            // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
+            // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
+            counter_marker.mark(Mark::NonMarked);
+
+            if Self::non_root(counter_marker) {
+                ctx.non_root_list.remove(ptr);
+            } else {
+                ctx.root_list.remove(ptr);
+            }
+
+            // Continue root tracing
+            true
+        } else {
+            // Don't continue tracing
+            false
+        }
+    }
+
+    #[inline(always)]
+    fn non_root(counter_marker: &CounterMarker) -> bool {
+        counter_marker.tracing_counter() == counter_marker.counter()
     }
 }
 

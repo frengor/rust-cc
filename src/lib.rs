@@ -22,7 +22,6 @@ use crate::cc::CcBox;
 use crate::counter_marker::Mark;
 use crate::list::*;
 use crate::state::{replace_state_field, State, try_state};
-use crate::trace::ContextInner;
 use crate::utils::*;
 
 #[cfg(all(test, feature = "std"))]
@@ -325,18 +324,26 @@ fn trace_counting(
     root_list: &mut List,
     non_root_list: &mut List,
 ) {
-    let mut ctx = Context::new(ContextInner::Counting {
+    let mut ctx = Context::new(
+        CcBox::trace_cc_box_counting,
         root_list,
         non_root_list,
-    });
+    );
 
-    CcBox::start_tracing(ptr, &mut ctx);
+    CcBox::setup_trace_counting(ptr, &mut ctx);
+    CcBox::trace_inner(ptr, &mut ctx);
 }
 
 fn trace_roots(mut root_list: List, non_root_list: &mut List) {
     while let Some(ptr) = root_list.remove_first() {
-        let mut ctx = Context::new(ContextInner::RootTracing { non_root_list, root_list: &mut root_list });
-        CcBox::start_tracing(ptr, &mut ctx);
+        let mut ctx = Context::new(
+            CcBox::trace_cc_box_roots,
+            &mut root_list,
+            non_root_list,
+        );
+
+        CcBox::setup_trace_roots(ptr, &mut ctx);
+        CcBox::trace_inner(ptr, &mut ctx);
     }
 
     mem::forget(root_list); // root_list is empty, no need run List::drop

@@ -193,11 +193,16 @@ fn test_trait_object() {
 
         let mut l1 = List::new();
         let mut l2 = List::new();
+        
+        fn dummy(_: NonNull<CcBox<()>>, _: &mut Context<'_>) -> bool {
+            true
+        }
 
-        cc.trace(&mut Context::new(ContextInner::Counting {
-            root_list: &mut l1,
-            non_root_list: &mut l2,
-        }));
+        cc.trace(&mut Context::new(
+            dummy,
+            &mut l1,
+            &mut l2,
+        ));
     }
 
     assert!(

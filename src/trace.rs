@@ -7,6 +7,7 @@ use core::num::{
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
 use core::panic::AssertUnwindSafe;
+use core::ptr::NonNull;
 use core::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
@@ -20,6 +21,7 @@ use std::{
     path::{Path, PathBuf},
     ffi::{OsStr, OsString}
 };
+use crate::cc::CcBox;
 
 use crate::List;
 
@@ -93,37 +95,26 @@ pub unsafe trait Trace: Finalize {
 
 /// Struct for tracing context.
 pub struct Context<'a> {
-    inner: ContextInner<'a>,
+    pub(crate) trace_fn: fn(NonNull<CcBox<()>>, &mut Context<'_>) -> bool,
+    pub(crate) root_list: &'a mut List,
+    pub(crate) non_root_list: &'a mut List,
     _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
 }
 
-pub(crate) enum ContextInner<'a> {
-    Counting {
-        root_list: &'a mut List,
-        non_root_list: &'a mut List,
-    },
-    RootTracing {
-        root_list: &'a mut List,
-        non_root_list: &'a mut List,
-    },
-}
-
-impl<'b> Context<'b> {
+impl<'a> Context<'a> {
     #[inline]
     #[must_use]
-    pub(crate) const fn new(ctxi: ContextInner) -> Context {
+    pub(crate) fn new(
+        trace_fn: fn(NonNull<CcBox<()>>, &mut Context<'_>) -> bool,
+        root_list: &'a mut List,
+        non_root_list: &'a mut List
+    ) -> Self {
         Context {
-            inner: ctxi,
+            trace_fn,
+            root_list,
+            non_root_list,
             _phantom: PhantomData,
         }
-    }
-
-    #[inline]
-    pub(crate) fn inner<'a>(&'a mut self) -> &'a mut ContextInner<'b>
-        where
-        'b: 'a,
-    {
-        &mut self.inner
     }
 }
 
