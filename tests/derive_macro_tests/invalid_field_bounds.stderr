@@ -5,14 +5,14 @@ error[E0277]: the trait bound `DoesNotImplementTrace: _::rust_cc::Trace` is not 
   |            ^^^^^^^^^^^^^^^^^^^^^ the trait `_::rust_cc::Trace` is not implemented for `DoesNotImplementTrace`
   |
   = help: the following other types implement trait `_::rust_cc::Trace`:
-            bool
-            char
-            isize
-            i8
-            i16
-            i32
-            i64
-            i128
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            (A, B, C, D, E)
+            (A, B, C, D, E, F)
+            (A, B, C, D, E, F, G)
+            (A, B, C, D, E, F, G, H)
           and $N others
 
 error[E0277]: the trait bound `DoesNotImplementTrace: _::rust_cc::Trace` is not satisfied
@@ -22,12 +22,12 @@ error[E0277]: the trait bound `DoesNotImplementTrace: _::rust_cc::Trace` is not 
    |       ^^^^^^^^^^^^^^^^^^^^^ the trait `_::rust_cc::Trace` is not implemented for `DoesNotImplementTrace`
    |
    = help: the following other types implement trait `_::rust_cc::Trace`:
-             bool
-             char
-             isize
-             i8
-             i16
-             i32
-             i64
-             i128
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
            and $N others
