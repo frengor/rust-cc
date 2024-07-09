@@ -1,3 +1,138 @@
+//! A fast garbage collector based on cycle collection for Rust programs.
+//!
+//! This crate provides a [`Cc`] (Cycle Collected) smart pointer, which is basically a [`Rc`] which automatically detects and
+//! deallocates reference cycles. If there are no reference cycles, then [`Cc`] behaves like [`Rc`] and deallocates
+//! immediately when the reference counter drops to zero.
+//!
+//! Currently, the cycle collector is not concurrent. As such, [`Cc`] doesn't implement [`Send`] nor [`Sync`].
+//! 
+//! ## Examples
+//!
+//! ### Basic usage
+//!
+#![cfg_attr(
+    feature = "derive",
+    doc = r"```rust"
+)]
+#![cfg_attr(
+    not(feature = "derive"),
+    doc = r"```rust,ignore"
+)]
+#![doc = r"# use rust_cc::*;
+# use rust_cc_derive::*;
+# use std::cell::RefCell;
+#[derive(Trace, Finalize)]
+struct Data {
+    a: Cc<u32>,
+    b: RefCell<Option<Cc<Data>>>,
+}
+
+// Rc-like API
+let my_cc = Cc::new(Data {
+    a: Cc::new(42),
+    b: RefCell::new(None),
+});
+
+let my_cc_2 = my_cc.clone();
+let pointed: &Data = &*my_cc_2;
+drop(my_cc_2);
+
+// Create a cycle!
+*my_cc.b.borrow_mut() = Some(my_cc.clone());
+
+// Here, the allocated Data instance doesn't get immediately deallocated, since there is a cycle.
+drop(my_cc);
+// We have to call the cycle collector
+collect_cycles();
+// collect_cycles() is automatically called from time to time when creating new Ccs,
+// calling it directly only ensures that a collection is run (like at the end of the program)
+```"]
+//!
+//! The derive macro for the `Finalize` trait generates an empty finalizer. To write custom finalizers implement the `Finalize` trait manually:
+//! 
+//! ```rust
+//!# use rust_cc::*;
+//!# struct Data;
+//! impl Finalize for Data {
+//!     fn finalize(&self) {
+//!         // Finalization code called when a Data object is about to be deallocated
+//!         // to allow resource clean up (like closing file descriptors, etc)
+//!     }
+//! }
+//! ```
+//! 
+//! ### Weak pointers
+//!
+#![cfg_attr(
+    feature = "weak-ptr",
+    doc = r"```rust"
+)]
+#![cfg_attr(
+    not(feature = "weak-ptr"),
+    doc = r"```rust,ignore"
+)]
+#![doc = r"# use rust_cc::*;
+# use rust_cc::weak::*;
+// Only Ccs containing a Weakable<_> support weak pointers
+// (WeakableCc<T> is just an alias for Cc<Weakable<T>>)
+let weakable: WeakableCc<i32> = Cc::new_weakable(5);
+ 
+// Obtain a weak pointer
+let weak_ptr: Weak<i32> = weakable.downgrade();
+ 
+// Upgrading a weak pointer cannot fail if the pointed allocation isn't deallocated
+let upgraded: Option<WeakableCc<i32>> = weak_ptr.upgrade();
+assert!(upgraded.is_some());
+
+// Deallocate the object
+drop(weakable);
+drop(upgraded);
+
+// Upgrading now fails
+assert!(weak_ptr.upgrade().is_none());
+```"]
+//!
+//! See the [`weak` module documentation][`mod@weak`] for more details.
+//! 
+//! ### Cleaners
+//!
+#![cfg_attr(
+    all(feature = "cleaners", feature = "derive"),
+    doc = r"```rust"
+)]
+#![cfg_attr(
+    not(all(feature = "cleaners", feature = "derive")),
+    doc = r"```rust,ignore"
+)]
+#![doc = r"# use rust_cc::*;
+# use rust_cc_derive::*;
+# use rust_cc::cleaners::*;
+#[derive(Trace, Finalize)]
+struct Foo {
+    cleaner: Cleaner,
+    // ...
+}
+
+let foo = Cc::new(Foo {
+    cleaner: Cleaner::new(),
+    // ...
+});
+
+let cleanable = foo.cleaner.register(move || {
+    // Cleaning action code
+    // Will be called automatically when foo.cleaner is dropped
+});
+
+// It's also possible to call the cleaning action manually
+cleanable.clean();
+```"]
+//! 
+//! See the [`cleaners` module documentation][`mod@cleaners`] for more details.
+//! 
+//! [`Send`]: `std::marker::Send`
+//! [`Sync`]: `std::marker::Sync`
+//! [`Rc`]: `std::rc::Rc`
+
 #![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata))]
 #![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(thread_local))] // no-std related unstable features
 #![cfg_attr(doc_auto_cfg, feature(doc_auto_cfg))]
@@ -39,13 +174,16 @@ mod utils;
 pub mod config;
 
 #[cfg(feature = "derive")]
-pub use rust_cc_derive::{Finalize, Trace};
+mod derives;
 
 #[cfg(feature = "weak-ptr")]
 pub mod weak;
 
 #[cfg(feature = "cleaners")]
 pub mod cleaners;
+
+#[cfg(feature = "derive")]
+pub use derives::{Finalize, Trace};
 
 pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
@@ -54,6 +192,9 @@ rust_cc_thread_local! {
     pub(crate) static POSSIBLE_CYCLES: RefCell<CountedList> = RefCell::new(CountedList::new());
 }
 
+/// Immediately executes the cycle collection algorithm and collects garbage cycles.
+///
+/// Calling this function during a collection won't start a new collection.
 pub fn collect_cycles() {
     let _ = try_state(|state| {
         if state.is_collecting() {

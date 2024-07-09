@@ -1,87 +1,78 @@
 # rust-cc
+[![Build status main branch](https://img.shields.io/github/check-runs/frengor/rust-cc/main?style=flat&label=main)](https://github.com/frengor/rust-cc/tree/main)
+[![Build status dev branch](https://img.shields.io/github/check-runs/frengor/rust-cc/dev?style=flat&label=dev)](https://github.com/frengor/rust-cc/tree/dev)
+[![docs.rs](https://img.shields.io/docsrs/rust-cc?style=flat)](https://docs.rs/rust-cc/latest/rust_cc/)
+[![Crates.io Version](https://img.shields.io/crates/v/rust-cc?style=flat&color=blue)](https://crates.io/crates/rust-cc)
+[![License](https://img.shields.io/crates/l/rust-cc?color=orange)](https://github.com/frengor/rust-cc#license)
 
-A fast cycle collector for Rust programs with built-in support for creating cycles of references.
+A fast garbage collector based on cycle collection for Rust programs.
 
-This crate provides a `Cc` (Cycle Collected) smart pointer, which is basically a `Rc` which automatically detects and 
-deallocates cycles of references. If there are no cycles of references, then `Cc` behaves like `Rc` and deallocates 
+This crate provides a `Cc` (Cycle Collected) smart pointer, which is basically a `Rc` that automatically detects and 
+deallocates reference cycles. If there are no reference cycles, then `Cc` behaves like `Rc` and deallocates 
 immediately when the reference counter drops to zero.
 
 Currently, the cycle collector is not concurrent. As such, `Cc` doesn't implement `Send` nor `Sync`.
 
-This crate is currently in beta, so please report any bug you find.
+## Features
 
-## Example Usage
+* Fully customizable with [Cargo features](https://lib.rs/crates/rust-cc/features)
+* Automatic execution of collections
+* Finalization
+* Weak pointers
+* Cleaners
+* No-std support (requires ELF TLS due to thread locals)
+
+## Basic usage example
 
 ```rust
+#[derive(Trace, Finalize)]
 struct Data {
     a: Cc<u32>,
-    b: Cc<RefCell<String>>,
-    c: Option<Cc<Data>>,
+    b: RefCell<Option<Cc<Data>>>,
 }
 
-// Objects allocated with Cc must implement the Trace and Finalize traits:
+// Rc-like API
+let my_cc = Cc::new(Data {
+    a: Cc::new(42),
+    b: RefCell::new(None),
+});
 
-unsafe impl Trace for Data {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        // Just call trace on every field.
-        // In future versions there will be a (safe) macro to automatically derive Trace.
-        // Also, make sure to read the Trace safety requirements in the documentation!
-        self.a.trace(ctx);
-        self.b.trace(ctx);
-        self.c.trace(ctx);
-    }
-}
+let my_cc_2 = my_cc.clone();
+let pointed: &Data = &*my_cc_2;
+drop(my_cc_2);
 
+// Create a cycle!
+*my_cc.b.borrow_mut() = Some(my_cc.clone());
+
+// Here, the allocated Data instance doesn't get immediately deallocated, since there is a cycle.
+drop(my_cc);
+// We have to call the cycle collector
+collect_cycles();
+// collect_cycles() is automatically called from time to time when creating new Ccs,
+// calling it directly only ensures that a collection is run (like at the end of the program)
+```
+
+The derive macro for the `Finalize` trait generates an empty finalizer. To write custom finalizers implement the `Finalize` trait manually:
+
+```rust
 impl Finalize for Data {
     fn finalize(&self) {
         // Finalization code called when a Data object is about to be deallocated
         // to allow resource clean up (like closing file descriptors, etc)
     }
 }
-
-fn main() {
-    // Cc::new lets you allocate an object, like Rc::new
-    let cc: Cc<Data> = Cc::new(Data {
-        a: Cc::new(5),
-        b: Cc::new(RefCell::new("a_string".to_string())),
-        c: None,
-    });
-
-    // RefCell can be used for interior mutability
-    *cc.b.borrow_mut() = "another_string".to_string();
-
-    // Cc(s) may be cloned freely, you don't need to worry about creating cycles!
-    let cloned = cc.clone();
-
-    drop(cc);
-    drop(cloned);
-    // Since there wasn't any cycle of references, the allocated Data instance gets immediately deallocated
-
-    // Let's create a cycle. Cc::new_cyclic is like Rc::new_cyclic, but `this` is NOT a weak reference
-    let cc = Cc::<Data>::new_cyclic(|this: &Cc<Data>| {
-        // Dereferencing `this` inside the closure will lead to a panic,
-        // since the object `this` points to hasn't been initialized yet
-        Data {
-            a: Cc::new(10),
-            b: Cc::new(RefCell::new("a_string".to_string())),
-            c: Some(this.clone()), // Cycle!
-        }
-    });
-
-    assert!(Cc::ptr_eq(&cc, cc.c.as_ref().unwrap()));
-
-    drop(cc);
-    // Here, the allocated Data instance doesn't gets deallocated automatically, since there is a cycle.
-    // We have to call the cycle collector
-    collect_cycles();
-    // collect_cycles() is automatically called from time to time when creating new Ccs,
-    // calling it directly only ensures that a collection is run (like at the end of the program)
-}
 ```
+
+> [!NOTE]  
+> Finalization adds an overhead to each collection execution. Cleaners provide a faster alternative to finalization.
+>
+> *When possible*, it's suggested to prefer cleaners and disable finalization.
+
+For more information read [the docs](https://docs.rs/rust-cc/latest/rust_cc/).
 
 ## The collection algorithm
 
-The main idea is to discover the roots (i.e. objects which are pointed to by a pointer on the stack) making use of
+The main idea is to discover the roots (i.e. objects which are surely not garbage) making use of
 the information contained in the reference counter, instead of having them from another source.  
 
 Usually, in garbage collected languages, the runtime has always a way to know which objects are roots (knowing the roots allows
@@ -90,9 +81,9 @@ However, since Rust has no runtime, this information isn't available! For this r
 in Rust for Rust programs have a very difficult time figuring out which objects can be deallocated and which
 cannot because they can still be accessed by the program.
 
-`rust-cc`, using the reference counters, is able to find the roots at runtime while collecting, eliminating the need to
-constantly keep track of the roots. This is also the reason why the standard `RefCell` can be safely used inside
-cycle collected objects for interior mutability.
+rust-cc, using the reference counters, is able to find the roots at runtime while collecting, eliminating the need to
+constantly keep track of them. This is also the reason why the standard `RefCell` (instead of a custom one) can be
+safely used inside cycle collected objects for interior mutability.
 
 Moreover, the implemented cycle collector should be generally faster than mark-and-sweep garbage collectors on big 
 (and fragmented) heaps, since there's no need to trace the whole heap every time it runs.
@@ -101,7 +92,7 @@ If you're interested in reading the source code, the algorithm is described more
 
 ## Benchmarks
 
-Benchmarks comparing `rust-cc` to other collectors can be found at <https://github.com/frengor/rust-cc-benchmarks>.
+Benchmarks comparing rust-cc to other collectors can be found at <https://github.com/frengor/rust-cc-benchmarks>.
 
 ## License
 

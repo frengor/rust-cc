@@ -1,3 +1,9 @@
+//! Non-owning [`Weak`] pointers to an allocation.
+//! 
+//! The [`downgrade`][`method@Cc::downgrade`] method can be used on a [`WeakableCc`] to create a non-owning [`Weak`][`crate::weak::Weak`] pointer.
+//! A [`Weak`][`crate::weak::Weak`] pointer can be [`upgrade`][`method@Weak::upgrade`]d to a [`Cc`], but this will return
+//! [`None`] if the allocation has already been deallocated.
+
 use alloc::rc::Rc;
 use core::ops::Deref;
 use core::{mem, ptr};
@@ -19,8 +25,10 @@ use crate::weak::weak_metadata::WeakMetadata;
 
 mod weak_metadata;
 
+/// A [`Cc`] which can be [`downgrade`][`method@Cc::downgrade`]d to a [`Weak`] pointer.
 pub type WeakableCc<T> = Cc<Weakable<T>>;
 
+/// A non-owning pointer to the managed allocation.
 pub struct Weak<T: ?Sized + Trace + 'static> {
     metadata: NonNull<WeakMetadata>,
     cc: NonNull<CcBox<Weakable<T>>>,
@@ -36,6 +44,13 @@ impl<T, U> CoerceUnsized<Weak<U>> for Weak<T>
 }
 
 impl<T: ?Sized + Trace + 'static> Weak<T> {
+    /// Tries to upgrade the weak pointer to a [`Cc`], returning [`None`] if the allocation has already been deallocated.
+    /// 
+    /// This creates a [`Cc`] pointer to the managed allocation, increasing the strong reference count.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the strong reference count exceeds the maximum supported.
     #[inline]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
@@ -59,11 +74,13 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
         }
     }
 
+    /// Returns `true` if the two [`Weak`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Weak<T>, other: &Weak<T>) -> bool {
         ptr::eq(this.metadata.as_ptr() as *const (), other.metadata.as_ptr() as *const ())
     }
 
+    /// Returns the number of [`Cc`]s to the pointed allocation.
     #[inline]
     pub fn strong_count(&self) -> u32 {
         if self.metadata().is_accessible() {
@@ -90,6 +107,7 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
         }
     }
 
+    /// Returns the number of [`Weak`]s to the pointed allocation.
     #[inline]
     pub fn weak_count(&self) -> u32 {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
@@ -103,6 +121,13 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
 }
 
 impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
+    /// Makes a clone of the [`Weak`] pointer.
+    /// 
+    /// This creates another [`Weak`] pointer to the same allocation, increasing the weak reference count.
+    /// 
+    /// # Panics
+    ///
+    /// Panics if the weak reference count exceeds the maximum supported.
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
@@ -149,6 +174,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Weak<T> {
 impl<T: ?Sized + Trace + 'static> Finalize for Weak<T> {
 }
 
+/// Enables to [`downgrade`][`method@Cc::downgrade`] a [`Cc`] to a [`Weak`] pointer.
 pub struct Weakable<T: ?Sized + Trace + 'static> {
     metadata: Cell<Option<NonNull<WeakMetadata>>>, // the Option is used to avoid allocating until a Weak is created
     _phantom: PhantomData<Rc<()>>, // Make Weakable !Send and !Sync
@@ -156,6 +182,7 @@ pub struct Weakable<T: ?Sized + Trace + 'static> {
 }
 
 impl<T: Trace + 'static> Weakable<T> {
+    /// Creates a new `Weakable`.
     #[inline(always)]
     #[must_use = "newly created Weakable is immediately dropped"]
     pub fn new(t: T) -> Weakable<T> {
@@ -196,6 +223,7 @@ impl<T: ?Sized + Trace + 'static> Weakable<T> {
 }
 
 impl<T: Trace + 'static> Cc<Weakable<T>> {
+    /// Creates a new [`WeakableCc`].
     #[inline(always)]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
@@ -203,6 +231,43 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
         Cc::new(Weakable::new(t))
     }
 
+    /// Creates a new [`WeakableCc<T>`][`WeakableCc`] while providing a [`Weak<T>`][`Weak`] pointer to the allocation,
+    /// to allow the creation of a `T` which holds a weak pointer to itself.
+    /// 
+    /// # Collection
+    /// 
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    ///
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the provided closure or the automatically-stared collection panics.
+    /// 
+    /// # Example
+#[cfg_attr(
+    feature = "derive",
+    doc = r"```rust"
+)]
+#[cfg_attr(
+    not(feature = "derive"),
+    doc = r"```rust,ignore"
+)]
+#[doc = r"# use rust_cc::*;
+# use rust_cc::*;
+# use rust_cc::weak::*;
+# use rust_cc_derive::*;
+#[derive(Trace, Finalize)]
+struct Cyclic {
+    cyclic: Weak<Self>,
+}
+
+let cyclic = Cc::new_cyclic(|weak| {
+    Cyclic {
+         cyclic: weak.clone(),
+    }
+});
+```"]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new_cyclic<F>(f: F) -> Cc<Weakable<T>>
@@ -289,6 +354,11 @@ impl<T: Trace + 'static> Cc<Weakable<T>> {
 }
 
 impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
+    /// Creates a new [`Weak`] pointer to the managed allocation, increasing the weak reference count.
+    /// 
+    /// # Panics
+    ///
+    /// Panics if the strong reference count exceeds the maximum supported.
     #[inline]
     #[must_use = "newly created Weak is immediately dropped"]
     #[track_caller]
@@ -313,6 +383,7 @@ impl<T: ?Sized + Trace + 'static> Cc<Weakable<T>> {
         }
     }
 
+    /// Returns the number of [`Weak`]s to the pointed allocation.
     #[inline]
     pub fn weak_count(&self) -> u32 {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions

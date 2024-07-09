@@ -1,12 +1,12 @@
 # rust-cc-derive
 
-Derive macro for the `rust-cc` crate.
+Derive macros for the `rust-cc` crate.
 
-## Example
+## Example Usage
 
 ```rust
 #[derive(Trace, Finalize)]
-struct A<T: Trace> {
+struct A<T: Trace + 'static> {
     a: Cc<T>,
     #[rust_cc(ignore)] // The b field won't be traced, safe to use!
     b: i32,

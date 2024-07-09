@@ -1,3 +1,5 @@
+//! Information about the garbage collector state.
+
 use alloc::alloc::Layout;
 use alloc::rc::Rc;
 use core::cell::Cell;
@@ -20,9 +22,11 @@ pub(crate) fn try_state<R>(f: impl FnOnce(&State) -> R) -> Result<R, StateAccess
     STATE.try_with(|state| Ok(f(state))).unwrap_or(Err(StateAccessError::AccessError))
 }
 
+/// An error returned by functions accessing the garbage collector state.
 #[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum StateAccessError {
+    /// The garbage collector state couldn't be accessed.
     #[error("couldn't access the state")]
     AccessError,
 }
@@ -150,6 +154,9 @@ impl Default for State {
     }
 }
 
+/// Returns the number of objects buffered to be processed in the next collection.
+///
+/// See [`Cc::mark_alive`][`crate::Cc::mark_alive`] for more details.
 #[inline]
 pub fn buffered_objects_count() -> Result<usize, StateAccessError> {
     // Expose this in state module even though the count is kept inside POSSIBLE_CYCLES
@@ -162,16 +169,21 @@ pub fn buffered_objects_count() -> Result<usize, StateAccessError> {
     }).unwrap_or(Err(StateAccessError::AccessError))
 }
 
+/// Returns the number of allocated bytes managed by the garbage collector.
 #[inline]
 pub fn allocated_bytes() -> Result<usize, StateAccessError> {
     try_state(|state| Ok(state.allocated_bytes()))?
 }
 
+/// Returns the total number of executed collections.
 #[inline]
 pub fn executions_count() -> Result<usize, StateAccessError> {
     try_state(|state| Ok(state.executions_count()))?
 }
 
+/// Returns `true` if the garbage collector is in a tracing phase, `false` otherwise.
+///
+/// See [`Trace`][`trait@crate::Trace`] for more details.
 #[inline]
 pub fn is_tracing() -> Result<bool, StateAccessError> {
     try_state(|state| Ok(state.is_tracing()))?

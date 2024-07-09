@@ -17,19 +17,35 @@ members = ["derive"]
 version = "0.2.0" # Also update in [dependencies.rust-cc-derive.version]
 authors = ["fren_gor <goro@frengor.com>"]
 repository = "https://github.com/frengor/rust-cc"
-categories = ["memory-management"]
+categories = ["memory-management", "no-std"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [features]
 default = ["auto-collect", "finalization", "derive", "std"]
+
+# Enables support for nightly-only features
 nightly = []
+
+# Enables the derive macros for the Trace and Finalize traits
 derive = ["dep:rust-cc-derive"]
+
+# Enables automatic executions of the collection algorithm
 auto-collect = []
+
+# Enables finalization
 finalization = []
+
+# Enables weak pointers
 weak-ptr = []
+
+# Enables cleaners
 cleaners = ["dep:slotmap", "weak-ptr"]
+
+# Enables support for stdlib, disable for no-std support (requires ELF TLS and nightly)
 std = ["slotmap?/std", "thiserror/std"]
+
+# (Internal use only) Enables more debug assertions useful for debugging
 pedantic-debug-assertions = []
 
 [dependencies]

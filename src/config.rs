@@ -1,3 +1,25 @@
+//! Configuration of the garbage collector.
+//!
+//! The configuration can be accessed using the [`config`][`fn@config`] function.
+//!
+//! # Automatic collection executions
+//!
+//! Collections can be automatically started if [`auto_collect`][`fn@Config::auto_collect`] is set to `true`.
+//!
+//! To determine whether to start a collection, a *threshold* is kept over the number of allocated bytes.
+//! When calling a function which may start a collection (e.g. [`Cc::new`][`crate::Cc::new`]),
+//! if the number of allocated bytes exceeds the *threshold* a collection is started.
+//!
+//! At the end of the automatically started collection, if the *threshold* is still lower than the number of allocated bytes
+//! then it is doubled until it exceed it.
+//!
+//! Instead, if the number of allocated bytes exceed the *threshold* multiplied by the [`adjustment_percent`][`fn@Config::adjustment_percent`],
+//! then the *threshold* is halved until the condition becomes true.
+//!
+//! Finally, a collection may also happen if the number of objects buffered to be processed in the next collection (see [`Cc::mark_alive`][`crate::Cc::mark_alive`])
+//! exceeds the [`buffered_objects_threshold`][`fn@Config::buffered_objects_threshold`]. This parameter is disabled by default, but can be enabled by
+//! using [`set_buffered_objects_threshold`][`fn@Config::set_buffered_objects_threshold`].
+
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::num::NonZeroUsize;
@@ -15,6 +37,21 @@ utils::rust_cc_thread_local! {
     pub(crate) static CONFIG: RefCell<Config> = const { RefCell::new(Config::new()) };
 }
 
+/// Access the configuration.
+///
+/// Returns [`Err`] if the configuration is already being accessed.
+///
+/// # Panics
+///
+/// Panics if the provided closure panics.
+///
+/// # Example
+/// ```rust
+///# use rust_cc::config::config;
+/// let res = config(|config| {
+///     // Edit the configuration
+/// }).unwrap();
+/// ```
 pub fn config<F, R>(f: F) -> Result<R, ConfigAccessError>
 where
     F: FnOnce(&mut Config) -> R,
@@ -22,20 +59,24 @@ where
     CONFIG.try_with(|config| {
         config
         .try_borrow_mut()
-        .or(Err(ConfigAccessError::BorrowMutError))
+        .or(Err(ConfigAccessError::ConcurrentAccessError))
         .map(|mut config| f(&mut config))
     }).unwrap_or(Err(ConfigAccessError::AccessError))
 }
 
+/// An error returned by [`config`][`fn@config`].
 #[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum ConfigAccessError {
+    /// The configuration couldn't be accessed.
     #[error("couldn't access the configuration")]
     AccessError,
-    #[error("couldn't borrow the configuration mutably")]
-    BorrowMutError,
+    /// The configuration was already being accessed.
+    #[error("the configuration is already being accessed")]
+    ConcurrentAccessError,
 }
 
+/// The configuration of the garbage collector.
 #[derive(Debug, Clone)]
 pub struct Config {
     // The invariant is:
@@ -59,21 +100,33 @@ impl Config {
         }
     }
 
+    /// Returns `true` if collections can be automatically started, `false` otherwise.
     #[inline]
     pub fn auto_collect(&self) -> bool {
         self.auto_collect
     }
 
+    /// Sets whether collections can be automatically started.
     #[inline]
     pub fn set_auto_collect(&mut self, auto_collect: bool) {
         self.auto_collect = auto_collect;
     }
 
+    /// Returns the threshold adjustment percent.
+    ///
+    /// See the [module-level documentation][`mod@crate::config`] for more details.
     #[inline]
     pub fn adjustment_percent(&self) -> f64 {
         self.adjustment_percent
     }
 
+    /// Sets the threshold adjustment percent.
+    ///
+    /// See the [module-level documentation][`mod@crate::config`] for more details.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provided `percent` isn't between 0 and 1 (included).
     #[inline]
     #[track_caller]
     pub fn set_adjustment_percent(&mut self, percent: f64) {
@@ -84,11 +137,21 @@ impl Config {
         self.adjustment_percent = percent;
     }
 
+    /// Returns the buffered-objects threshold (see [`Cc::mark_alive`][`crate::Cc::mark_alive`]).
+    ///
+    /// Returns [`None`] if this parameter isn't used to start a collection.
+    ///
+    /// See the [module-level documentation][`mod@crate::config`] for more details.
     #[inline]
     pub fn buffered_objects_threshold(&self) -> Option<NonZeroUsize> {
         self.buffered_threshold
     }
 
+    /// Sets the buffered-objects threshold (see [`Cc::mark_alive`][`crate::Cc::mark_alive`]).
+    ///
+    /// If the provided `threshold` is [`None`], then this parameter will not be used to start a collection.
+    ///
+    /// See the [module-level documentation][`mod@crate::config`] for more details.
     #[inline]
     #[track_caller]
     pub fn set_buffered_objects_threshold(&mut self, threshold: Option<NonZeroUsize>) {
