@@ -6,7 +6,7 @@ authors.workspace = true
 readme = "README.md"
 repository.workspace = true
 categories = ["memory-management"]
-keywords = ["cycle", "cycles", "collector", "memory", "macro"]
+keywords = ["cycle-collector", "garbage-collector", "gc", "reference-counting", "macro"]
 license.workspace = true
 edition.workspace = true
 
