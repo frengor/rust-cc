@@ -5,7 +5,9 @@ on:
     types: [labeled]
 
 env:
+  IAI_CALLGRIND_VERSION: 0.7.3
   CARGO_TERM_COLOR: always
+  IAI_CALLGRIND_COLOR: never
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
@@ -22,12 +24,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@valgrind
+      - uses: taiki-e/install-action@cargo-binstall
+      - name: Install iai-callgrind-runner
+        run: cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version ${IAI_CALLGRIND_VERSION}
       - name: Bench base branch
         run: |
-          sudo apt-get update
-          sudo apt-get install -y valgrind
           cargo update
-          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____old_results.txt
+          cargo bench -q --bench bench > "${WORKSPACE}"/____old_results.txt
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.ref }}
@@ -35,7 +39,7 @@ jobs:
       - name: Bench head branch
         run: |
           cargo update
-          cargo bench -F full -q --bench bench > "${WORKSPACE}"/____results.txt
+          cargo bench -q --bench bench > "${WORKSPACE}"/____results.txt
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.base.ref }}
@@ -44,7 +48,7 @@ jobs:
         run: |
           cargo clean
           cargo update
-          cargo bench --no-default-features -F auto-collect -q --bench bench > "${WORKSPACE}"/____old_results_no_finalization.txt
+          cargo bench --no-default-features -F std,derive,auto-collect -q --bench bench > "${WORKSPACE}"/____old_results_no_finalization.txt
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.ref }}
@@ -52,28 +56,36 @@ jobs:
       - name: Bench head branch no finalization
         run: |
           cargo update
-          cargo bench --no-default-features -F auto-collect -q --bench bench > "${WORKSPACE}"/____results_no_finalization.txt
+          cargo bench --no-default-features -F std,derive,auto-collect -q --bench bench > "${WORKSPACE}"/____results_no_finalization.txt
       - name: Write comment
         run: |
           {
             echo '<strong>Benchmark results:</strong>'
             echo ''
+            echo '```txt'
             cat "${WORKSPACE}"/____results.txt
+            echo '```'
             echo ''
             echo '<details><summary><strong>Old results:</strong></summary><p>'
             echo ''
+            echo '```txt'
             cat "${WORKSPACE}"/____old_results.txt
+            echo '```'
             echo '</p></details>'
             echo ''
             echo '---'
             echo ''
             echo '<details><summary><strong>Results without finalization:</strong></summary><p>'
             echo ''
+            echo '```txt'
             cat "${WORKSPACE}"/____results_no_finalization.txt
+            echo '```'
             echo ''
             echo '<details><summary><strong>Old results without finalization:</strong></summary><p>'
             echo ''
+            echo '```txt'
             cat "${WORKSPACE}"/____old_results_no_finalization.txt
+            echo '```'
             echo '</p></details></p></details>'
           } > "${WORKSPACE}"/__result.txt
       - uses: thollander/actions-comment-pull-request@v2.3.1

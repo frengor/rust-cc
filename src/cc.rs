@@ -1,26 +1,30 @@
-use std::alloc::Layout;
-use std::cell::UnsafeCell;
-use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
-use std::ops::Deref;
-use std::ptr::{self, addr_of, drop_in_place, NonNull};
-use std::rc::Rc;
+use alloc::alloc::Layout;
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::mem;
+use core::ops::Deref;
+use core::ptr::{self, drop_in_place, NonNull};
+use alloc::rc::Rc;
 #[cfg(feature = "nightly")]
-use std::{
+use core::{
     marker::Unsize,
     ops::CoerceUnsized,
     ptr::{metadata, DynMetadata},
 };
 
 use crate::counter_marker::{CounterMarker, Mark};
-use crate::state::{replace_state_field, state, try_state};
+use crate::state::{replace_state_field, state, State, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
+use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 
+/// A thread-local cycle collected pointer.
+///
+/// See the [module-level documentation][`mod@crate`] for more details.
 #[repr(transparent)]
 pub struct Cc<T: ?Sized + Trace + 'static> {
-    inner: NonNull<CcOnHeap<T>>,
+    inner: NonNull<CcBox<T>>,
     _phantom: PhantomData<Rc<T>>, // Make Cc !Send and !Sync
 }
 
@@ -33,78 +37,57 @@ where
 }
 
 impl<T: Trace + 'static> Cc<T> {
+    /// Creates a new `Cc`.
+    /// 
+    /// # Collection
+    /// 
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    /// 
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the automatically-stared collection panics.
     #[inline(always)]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot create a new Cc while tracing!");
-        }
+        state(|state| {
+            #[cfg(debug_assertions)]
+            if state.is_tracing() {
+                panic!("Cannot create a new Cc while tracing!");
+            }
 
-        #[cfg(feature = "auto-collect")]
-        super::trigger_collection();
+            #[cfg(feature = "auto-collect")]
+            super::trigger_collection();
 
-        Cc {
-            inner: CcOnHeap::new(t),
-            _phantom: PhantomData,
-        }
+            Cc {
+                inner: CcBox::new(t, state),
+                _phantom: PhantomData,
+            }
+        })
     }
 
-    #[must_use = "newly created Cc is immediately dropped"]
-    #[track_caller]
-    pub fn new_cyclic<F>(f: F) -> Cc<T>
-    where
-        F: FnOnce(&Cc<T>) -> T,
-    {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot create a new Cc while tracing!");
-        }
-
-        #[cfg(feature = "auto-collect")]
-        super::trigger_collection();
-
-        let mut invalid: NonNull<CcOnHeap<MaybeUninit<T>>> = CcOnHeap::<T>::new_invalid();
-        let cc = Cc {
-            inner: invalid.cast(),
-            _phantom: PhantomData,
-        };
-
-        unsafe {
-            // Write the newly created T
-            invalid.as_mut().elem.get_mut().write(f(&cc));
-        }
-
-        // Set valid
-        cc.counter_marker().mark(Mark::NonMarked);
-
-        // Return cc, since it is now valid
-        cc
-    }
-
-    /// Takes out the value inside this [`Cc`].
-    ///
-    /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
+    /// Takes out the value inside a [`Cc`].
     ///
     /// # Panics
-    /// This function panics if this [`Cc`] is not valid (see [`is_valid`]) or is not unique (see [`is_unique`]).
+    /// Panics if the [`Cc`] is not unique (see [`is_unique`]).
     ///
-    /// [`is_valid`]: fn@Cc::is_valid
     /// [`is_unique`]: fn@Cc::is_unique
     #[inline]
     #[track_caller]
     pub fn into_inner(self) -> T {
-        assert!(self.is_valid(), "Cc<_> is not valid");
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            !self.counter_marker().is_traced_or_invalid(),
+            !self.counter_marker().is_traced(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
         // Make sure self is not into POSSIBLE_CYCLES before deallocating
         remove_from_list(self.inner.cast());
 
-        // SAFETY: self is unique, valid and is not inside any list
+        // SAFETY: self is unique and is not inside any list
         unsafe {
             let t = ptr::read(self.inner().get_elem());
             let layout = self.inner().layout();
@@ -115,135 +98,104 @@ impl<T: Trace + 'static> Cc<T> {
     }
 }
 
-impl<T: Trace + 'static> Cc<MaybeUninit<T>> {
-    /// Assumes that this [`Cc`] has been initialized.
-    ///
-    /// # Safety
-    /// See [`MaybeUninit::assume_init`].
-    ///
-    /// # Panics
-    /// This function panics if called while tracing or this [`Cc`] isn't valid (see [`is_valid`]).
-    ///
-    /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
-    /// [`is_unique`]: fn@Cc::is_unique
-    /// [`is_valid`]: fn@Cc::is_valid
-    #[inline]
-    #[track_caller]
-    pub unsafe fn assume_init(self) -> Cc<T> {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot initialize a Cc while tracing!");
-        }
-
-        assert!(self.is_valid());
-
-        remove_from_list(self.inner.cast());
-
-        // The counter should not be updated since we're taking self
-        let cc = Cc {
-            inner: self.inner.cast(), // Safe since we're requiring that it is initialized
-            _phantom: PhantomData,
-        };
-
-        mem::forget(self); // Don't call drop on this Cc
-        cc
-    }
-
-    /// Initialize this [`Cc`] with the provided value and returns the initialized [`Cc<T>`].
-    ///
-    /// This is safe since this function panics if this [`Cc`] is not unique (see [`is_unique`]).
-    ///
-    /// # Panics
-    /// This function panics if this [`Cc`] is not valid (see [`is_valid`]), is not unique (see [`is_unique`]) or if it's called while tracing.
-    ///
-    /// [`Cc<T>`]: struct@Cc
-    /// [`MaybeUninit::assume_init`]: fn@MaybeUninit::assume_init
-    /// [`is_unique`]: fn@Cc::is_unique
-    /// [`is_valid`]: fn@Cc::is_valid
-    #[inline]
-    #[track_caller]
-    pub fn init(mut self, value: T) -> Cc<T> {
-        if state(|state| state.is_tracing()) {
-            panic!("Cannot initialize a Cc while tracing!");
-        }
-
-        assert!(self.is_valid());
-
-        // This prevents race conditions
-        assert!(self.is_unique(), "Cc is not unique");
-
-        remove_from_list(self.inner.cast());
-
-        unsafe {
-            self.inner.as_mut().elem.get_mut().write(value);
-        }
-
-        // The counter should not be updated since we're taking self
-        let cc = Cc {
-            inner: self.inner.cast(), // Safe since we've just initialized it
-            _phantom: PhantomData,
-        };
-
-        mem::forget(self); // Don't call drop on this Cc
-        cc
-    }
-}
-
 impl<T: ?Sized + Trace + 'static> Cc<T> {
+    /// Returns `true` if the two [`Cc`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
-        this.inner.as_ptr() == other.inner.as_ptr()
+        ptr::eq(this.inner.as_ptr() as *const (), other.inner.as_ptr() as *const ())
     }
 
+    /// Returns the number of [`Cc`]s to the pointed allocation.
     #[inline]
     pub fn strong_count(&self) -> u32 {
         self.counter_marker().counter()
     }
 
+    /// Returns `true` if the strong reference count is `1`, `false` otherwise.
     #[inline]
     pub fn is_unique(&self) -> bool {
         self.strong_count() == 1
     }
 
-    #[inline]
-    pub fn is_valid(&self) -> bool {
-        self.counter_marker().is_valid()
-    }
-
+    /// Makes the value in the managed allocation finalizable again.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if called during a collection.
     #[cfg(feature = "finalization")]
     #[inline]
     #[track_caller]
     pub fn finalize_again(&mut self) {
-        assert!(state(|state| !state.is_collecting()), "Cannot schedule finalization again while collecting");
+        // The is_finalizing and is_dropping checks are necessary to avoid letting this function
+        // be called from Cc::drop implementation, since it doesn't set is_collecting to true
+        assert!(
+            state(|state| !state.is_collecting() && !state.is_finalizing() && !state.is_dropping()),
+            "Cc::finalize_again cannot be called while collecting"
+        );
 
         self.counter_marker().set_finalized(false);
     }
 
+    /// Returns `true` if the value in the managed allocation has already been finalized, `false` otherwise.
     #[cfg(feature = "finalization")]
     #[inline]
     pub fn already_finalized(&self) -> bool {
         !self.counter_marker().needs_finalization()
     }
 
-    #[inline(always)]
-    fn counter_marker(&self) -> &CounterMarker {
-        // SAFETY: It's always safe to access the counter_marker if we're not dereferencing anything else
-        unsafe {
-            &*addr_of!((*self.inner.as_ptr()).counter_marker)
-        }
+    /// Marks the managed allocation as *alive*.
+    /// 
+    /// Every time a [`Cc`] is dropped, the pointed allocation is buffered to be processed in the next collection.
+    /// This method simply removes the managed allocation from the buffer, potentially reducing the amount of work
+    /// needed to be done by the collector.
+    /// 
+    /// This method is a no-op when called on a [`Cc`] pointing to an allocation which is not buffered.
+    #[inline]
+    pub fn mark_alive(&self) {
+        remove_from_list(self.inner.cast());
     }
 
-    /// Note: don't call if CcOnHeap is not valid!
     #[inline(always)]
-    fn inner(&self) -> &CcOnHeap<T> {
-        // SAFETY: since Cc is alive and the underlying CcOnHeap is valid then we can access it
+    fn counter_marker(&self) -> &CounterMarker {
+        &self.inner().counter_marker
+    }
+
+    #[inline(always)]
+    pub(crate) fn inner(&self) -> &CcBox<T> {
         unsafe { self.inner.as_ref() }
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline(always)]
+    pub(crate) fn inner_ptr(&self) -> NonNull<CcBox<T>> {
+        self.inner
+    }
+
+    #[cfg(feature = "weak-ptr")] // Currently used only here
+    #[inline(always)]
+    #[must_use]
+    pub(crate) fn __new_internal(inner: NonNull<CcBox<T>>) -> Cc<T> {
+        Cc {
+            inner,
+            _phantom: PhantomData,
+        }
     }
 }
 
 impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
+    /// Makes a clone of the [`Cc`] pointer.
+    /// 
+    /// This creates another pointer to the same allocation, increasing the strong reference count.
+    /// 
+    /// Cloning a [`Cc`] also marks the managed allocation as `alive`. See [`mark_alive`][`Cc::mark_alive`] for more details.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the strong reference count exceeds the maximum supported.
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot clone while tracing!");
         }
@@ -252,9 +204,9 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
             panic!("Too many references has been created to a single Cc");
         }
 
-        remove_from_list(self.inner.cast());
+        self.mark_alive();
 
-        // It's always safe to clone a Cc, even if the underlying CcOnHeap is invalid
+        // It's always safe to clone a Cc
         Cc {
             inner: self.inner,
             _phantom: PhantomData,
@@ -268,72 +220,96 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
     #[inline]
     #[track_caller]
     fn deref(&self) -> &Self::Target {
+        #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
             panic!("Cannot deref while tracing!");
         }
 
-        // Make sure we don't access an invalid Cc
-        assert!(self.is_valid(), "This Cc is not valid!");
+        //self.mark_alive();
 
-        remove_from_list(self.inner.cast());
-        // We can do this since self is valid
         self.inner().get_elem()
     }
 }
 
 impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     fn drop(&mut self) {
-        let counter_marker = self.counter_marker();
+        #[cfg(debug_assertions)]
+        if state(|state| state.is_tracing()) {
+            panic!("Cannot drop while tracing!");
+        }
 
-        // Always decrement the counter
-        let res = counter_marker.decrement_counter();
-        debug_assert!(res.is_ok());
+        #[inline]
+        fn decrement_counter<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+            // Always decrement the counter
+            let res = cc.counter_marker().decrement_counter();
+            debug_assert!(res.is_ok());
+        }
 
-        // A CcOnHeap can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
-        // In this case, or when invalid, no further action has to be taken, since the counter has been already decremented.
-        if counter_marker.is_traced_or_invalid() {
+        #[inline]
+        fn handle_possible_cycle<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+            decrement_counter(cc);
+
+            // We know that we're not part of either root_list or non_root_list, since the cc isn't traced
+            add_to_list(cc.inner.cast());
+        }
+
+        // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
+        // In this case, no further action has to be taken, except decrementing the reference counter.
+        if self.counter_marker().is_traced() {
+            decrement_counter(self);
             return;
         }
 
-        if counter_marker.counter() == 0 {
+        if self.counter_marker().counter() == 1 {
             // Only us have a pointer to this allocation, deallocate!
 
-            remove_from_list(self.inner.cast());
-
             state(|state| {
-                let to_drop = if cfg!(feature = "finalization") && counter_marker.needs_finalization() {
-                    // This cfg is necessary since the cfg! above still compiles the line below,
-                    // however state doesn't contain the finalizing field when the finalization feature is off,
-                    // so removing this cfg makes the crate to fail compilation
-                    #[cfg(feature = "finalization")]
+                #[cfg(feature = "finalization")]
+                if self.counter_marker().needs_finalization() {
                     let _finalizing_guard = replace_state_field!(finalizing, true, state);
 
                     // Set finalized
-                    counter_marker.set_finalized(true);
+                    self.counter_marker().set_finalized(true);
 
                     self.inner().get_elem().finalize();
-                    counter_marker.counter() == 0
-                    // _finalizing_guard is dropped here, resetting state.finalizing
-                } else {
-                    true
-                };
 
-                if to_drop {
-                    let _dropping_guard = replace_state_field!(dropping, true, state);
-                    let layout = self.inner().layout();
-
-                    // SAFETY: we're the only one to have a pointer to this allocation and we checked that inner is valid
-                    unsafe {
-                        drop_in_place(self.inner().elem.get());
-                        cc_dealloc(self.inner, layout, state);
+                    if self.counter_marker().counter() != 1 {
+                        // The object has been resurrected
+                        handle_possible_cycle(self);
+                        return;
                     }
-                    // _dropping_guard is dropped here, resetting state.dropping
+                    // _finalizing_guard is dropped here, resetting state.finalizing
                 }
+
+                decrement_counter(self);
+                remove_from_list(self.inner.cast());
+
+                let _dropping_guard = replace_state_field!(dropping, true, state);
+                let layout = self.inner().layout();
+
+                // Set the object as dropped before dropping and deallocating it
+                // This feature is used only in weak pointers, so do this only if they're enabled
+                #[cfg(feature = "weak-ptr")]
+                {
+                    self.counter_marker().set_dropped(true);
+                }
+
+                // SAFETY: we're the only one to have a pointer to this allocation
+                unsafe {
+                    drop_in_place(self.inner().get_elem_mut());
+
+                    #[cfg(feature = "pedantic-debug-assertions")]
+                    debug_assert_eq!(
+                        0, self.counter_marker().counter(),
+                        "Trying to deallocate a CcBox with a reference counter > 0"
+                    );
+
+                    cc_dealloc(self.inner, layout, state);
+                }
+                // _dropping_guard is dropped here, resetting state.dropping
             });
         } else {
-            // SAFETY: we checked that inner is valid
-            // We also know that we're not part of either root_list or non_root_list, since we haven't returned earlier
-            unsafe { add_to_list(self.inner.cast()) };
+            handle_possible_cycle(self);
         }
     }
 }
@@ -342,14 +318,8 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        // This must be done, since it is possible to call this function on an invalid instance
-        assert!(self.is_valid());
-
-        // SAFETY: we have just checked that self is valid
-        unsafe {
-            if CcOnHeap::trace(self.inner.cast(), ctx) {
-                self.inner().get_elem().trace(ctx);
-            }
+        if CcBox::trace(self.inner.cast(), ctx) {
+            self.inner().get_elem().trace(ctx);
         }
     }
 }
@@ -357,9 +327,9 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
 impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
 
 #[repr(C)]
-pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
-    next: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
-    prev: UnsafeCell<Option<NonNull<CcOnHeap<()>>>>,
+pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
+    next: UnsafeCell<Option<NonNull<CcBox<()>>>>,
+    prev: UnsafeCell<Option<NonNull<CcBox<()>>>>,
 
     #[cfg(feature = "nightly")]
     vtable: DynMetadata<dyn InternalTrace>,
@@ -368,30 +338,36 @@ pub(crate) struct CcOnHeap<T: ?Sized + Trace + 'static> {
     fat_ptr: NonNull<dyn InternalTrace>,
 
     counter_marker: CounterMarker,
-    _phantom: PhantomData<Rc<()>>, // Make CcOnHeap !Send and !Sync
+    _phantom: PhantomData<Rc<()>>, // Make CcBox !Send and !Sync
 
-    // This UnsafeCell is necessary, since we want to execute Drop::drop
-    // for elem but still have access to the other fields of CcOnHeap
+    // This UnsafeCell is necessary, since we want to execute Drop::drop (which takes an &mut)
+    // for elem but still have access to the other fields of CcBox
     elem: UnsafeCell<T>,
 }
 
-impl<T: Trace + 'static> CcOnHeap<T> {
+impl<T: Trace + 'static> CcBox<T> {
     #[inline(always)]
     #[must_use]
-    fn new(t: T) -> NonNull<CcOnHeap<T>> {
-        let layout = Layout::new::<CcOnHeap<T>>();
+    fn new(t: T, state: &State) -> NonNull<CcBox<T>> {
+        let layout = Layout::new::<CcBox<T>>();
+
+        #[cfg(feature = "finalization")]
+        let already_finalized = state.is_finalizing();
+        #[cfg(not(feature = "finalization"))]
+        let already_finalized = false;
+
         unsafe {
-            let ptr: NonNull<CcOnHeap<T>> = cc_alloc(layout);
+            let ptr: NonNull<CcBox<T>> = cc_alloc(layout, state);
             ptr::write(
                 ptr.as_ptr(),
-                CcOnHeap {
+                CcBox {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
                     #[cfg(feature = "nightly")]
                     vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
                     #[cfg(not(feature = "nightly"))]
                     fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
-                    counter_marker: CounterMarker::new_with_counter_to_one(),
+                    counter_marker: CounterMarker::new_with_counter_to_one(already_finalized),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
                 },
@@ -401,53 +377,22 @@ impl<T: Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline(always)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
-    pub(crate) fn new_for_tests(t: T) -> NonNull<CcOnHeap<T>> {
-        CcOnHeap::new(t)
-    }
-
-    #[inline]
-    #[must_use]
-    fn new_invalid() -> NonNull<CcOnHeap<MaybeUninit<T>>> {
-        let layout = Layout::new::<CcOnHeap<MaybeUninit<T>>>();
-        unsafe {
-            let ptr: NonNull<CcOnHeap<MaybeUninit<T>>> = cc_alloc(layout);
-            ptr::write(
-                ptr.as_ptr(),
-                CcOnHeap {
-                    next: UnsafeCell::new(None),
-                    prev: UnsafeCell::new(None),
-                    #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace),
-                    #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(
-                        ptr.cast::<CcOnHeap<T>>().as_ptr() as *mut dyn InternalTrace
-                    ),
-                    counter_marker: {
-                        let cm = CounterMarker::new_with_counter_to_one();
-                        cm.mark(Mark::Invalid);
-                        cm
-                    },
-                    _phantom: PhantomData,
-                    elem: UnsafeCell::new(MaybeUninit::uninit()),
-                },
-            );
-            ptr
-        }
+    pub(crate) fn new_for_tests(t: T) -> NonNull<CcBox<T>> {
+        state(|state| CcBox::new(t, state))
     }
 }
 
-impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> CcBox<T> {
     #[inline]
-    pub(crate) fn is_valid(&self) -> bool {
-        self.counter_marker().is_valid()
+    pub(crate) fn get_elem(&self) -> &T {
+        unsafe { &*self.elem.get() }
     }
 
     #[inline]
-    pub(crate) fn get_elem(&self) -> &T {
-        debug_assert!(self.is_valid());
-        unsafe { &*self.elem.get() }
+    pub(crate) fn get_elem_mut(&self) -> *mut T {
+        self.elem.get()
     }
 
     #[inline]
@@ -469,79 +414,63 @@ impl<T: ?Sized + Trace + 'static> CcOnHeap<T> {
     }
 
     #[inline]
-    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcOnHeap<()>>> {
+    pub(super) fn get_next(&self) -> *mut Option<NonNull<CcBox<()>>> {
         self.next.get()
     }
 
     #[inline]
-    pub(super) fn get_prev(&self) -> *mut Option<NonNull<CcOnHeap<()>>> {
+    pub(super) fn get_prev(&self) -> *mut Option<NonNull<CcBox<()>>> {
         self.prev.get()
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for CcOnHeap<T> {
+unsafe impl<T: ?Sized + Trace + 'static> Trace for CcBox<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
-        // This should never be called on an invalid instance.
-        // The debug_assert should catch any bug related to this
-        debug_assert!(self.is_valid());
-
         self.get_elem().trace(ctx);
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> Finalize for CcBox<T> {
     #[inline(always)]
     fn finalize(&self) {
-        // This should never be called on an invalid instance.
-        // The debug_assert should catch any bug related to this
-        debug_assert!(self.is_valid());
-
         self.get_elem().finalize();
     }
 }
 
 #[inline]
-pub(crate) fn remove_from_list(ptr: NonNull<CcOnHeap<()>>) {
-    unsafe {
-        let counter_marker = ptr.as_ref().counter_marker();
+pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
+    let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
-        // Check if ptr is in possible_cycles list. Note that if ptr points to an invalid CcOnHeap<_>,
-        // then the if guard should never be true, since it is always marked as Mark::Invalid.
-        // This is also the reason why this function is not marked as unsafe.
-        if counter_marker.is_in_possible_cycles() {
-            // ptr is in the list, remove it
-            let _ = POSSIBLE_CYCLES.try_with(|pc| {
-                let mut list = pc.borrow_mut();
-                // Confirm is_in_possible_cycles() in debug builds
-                #[cfg(feature = "pedantic-debug-assertions")]
-                debug_assert!(list.contains(ptr));
-
-                counter_marker.mark(Mark::NonMarked);
-                list.remove(ptr);
-            });
-        } else {
-            // ptr is not in the list
-
-            // Confirm !is_in_possible_cycles() in debug builds.
-            // This is safe to do since we're not putting the CcOnHeap into the list
+    // Check if ptr is in possible_cycles list
+    if counter_marker.is_in_possible_cycles() {
+        // ptr is in the list, remove it
+        let _ = POSSIBLE_CYCLES.try_with(|pc| {
+            let mut list = pc.borrow_mut();
+            // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert! {
-                POSSIBLE_CYCLES.try_with(|pc| {
-                    !pc.borrow().contains(ptr)
-                }).unwrap_or(true)
-            };
-        }
+            debug_assert!(list.contains(ptr));
+
+            counter_marker.mark(Mark::NonMarked);
+            list.remove(ptr);
+        });
+    } else {
+        // ptr is not in the list
+
+        // Confirm !is_in_possible_cycles() in debug builds.
+        // This is safe to do since we're not putting the CcBox into the list
+        #[cfg(feature = "pedantic-debug-assertions")]
+        debug_assert! {
+            POSSIBLE_CYCLES.try_with(|pc| {
+                !pc.borrow().contains(ptr)
+            }).unwrap_or(true)
+        };
     }
 }
 
-/// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
 #[inline]
-pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
-    let counter_marker = ptr.as_ref().counter_marker();
-
-    // Check if ptr can be added safely
-    debug_assert!(counter_marker.is_valid());
+pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
+    let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
         let mut list = pc.borrow_mut();
@@ -565,64 +494,59 @@ pub(crate) unsafe fn add_to_list(ptr: NonNull<CcOnHeap<()>>) {
         }
         // Add to the list
         //
-        // Make sure this operation is the first after the if-else, since the CcOnHeap is in
+        // Make sure this operation is the first after the if-else, since the CcBox is in
         // an invalid state now (it's marked Mark::PossibleCycles, but it isn't into the list)
         list.add(ptr);
     });
 }
 
-// Functions in common between every CcOnHeap<_>
-impl CcOnHeap<()> {
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
+// Functions in common between every CcBox<_>
+impl CcBox<()> {
     #[inline]
-    pub(super) unsafe fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        CcOnHeap::get_traceable(ptr).as_ref().trace(ctx);
-    }
-
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
-    #[cfg(feature = "finalization")]
-    #[inline]
-    pub(super) unsafe fn finalize_inner(ptr: NonNull<Self>) -> bool {
-        if ptr.as_ref().counter_marker().needs_finalization() {
-            // Set finalized
-            ptr.as_ref().counter_marker().set_finalized(true);
-
-            CcOnHeap::get_traceable(ptr).as_ref().finalize_elem();
-            true
-        } else {
-            false
+    pub(super) fn trace_inner(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+        unsafe {
+            CcBox::get_traceable(ptr).as_ref().trace(ctx);
         }
     }
 
-    /// SAFETY: `drop_in_place` conditions must be true and ptr must be pointing to a valid CcOnHeap<_>.
-    ///         More formally, `ptr.as_ref().is_valid()` must return `true`.
+    #[cfg(feature = "finalization")]
     #[inline]
-    pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        CcOnHeap::get_traceable(ptr).as_mut().drop_elem();
+    pub(super) fn finalize_inner(ptr: NonNull<Self>) -> bool {
+        unsafe {
+            if ptr.as_ref().counter_marker().needs_finalization() {
+                // Set finalized
+                ptr.as_ref().counter_marker().set_finalized(true);
+
+                CcBox::get_traceable(ptr).as_ref().finalize_elem();
+                true
+            } else {
+                false
+            }
+        }
     }
 
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
+    /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
-    unsafe fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
-        debug_assert!(ptr.as_ref().is_valid()); // Just to be sure
+    pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
+        CcBox::get_traceable(ptr).as_mut().drop_elem();
+    }
 
+    #[inline]
+    fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
         #[cfg(feature = "nightly")]
-        {
+        unsafe {
             let vtable = ptr.as_ref().vtable;
             NonNull::from_raw_parts(ptr.cast(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
-        {
+        unsafe {
             ptr.as_ref().fat_ptr
         }
     }
 
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
-    pub(super) unsafe fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        debug_assert!(ptr.as_ref().is_valid());
-
-        let counter_marker = ptr.as_ref().counter_marker();
+    pub(super) fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting { root_list, .. } => {
                 // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
@@ -647,30 +571,24 @@ impl CcOnHeap<()> {
         // ptr is surely to trace
         //
         // This function is called from collect_cycles(), which doesn't know the
-        // exact type of the element inside CcOnHeap, so trace it using the vtable
-        //
-        // SAFETY: we require that ptr points to a valid CcOnHeap<_>
-        CcOnHeap::trace_inner(ptr, ctx);
+        // exact type of the element inside CcBox, so trace it using the vtable
+        CcBox::trace_inner(ptr, ctx);
     }
 
     /// Returns whether `ptr.elem` should be traced.
     ///
-    /// This function returns a `bool` instead of directly tracing the element inside the CcOnHeap, since this way
+    /// This function returns a `bool` instead of directly tracing the element inside the CcBox, since this way
     /// we can avoid using the vtable most of the times (the responsibility of tracing the inner element is passed
-    /// to the caller, which *might* have more information on the type inside CcOnHeap than us).
-    ///
-    /// SAFETY: ptr must be pointing to a valid CcOnHeap<_>. More formally, `ptr.as_ref().is_valid()` must return `true`.
+    /// to the caller, which *might* have more information on the type inside CcBox than us).
     #[inline(never)] // Don't inline this function, it's huge
-    #[must_use = "the element inside ptr is not traced by CcOnHeap::trace"]
-    unsafe fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
-        debug_assert!(ptr.as_ref().is_valid());
-
+    #[must_use = "the element inside ptr is not traced by CcBox::trace"]
+    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
         #[inline(always)]
         fn non_root(counter_marker: &CounterMarker) -> bool {
             counter_marker.tracing_counter() == counter_marker.counter()
         }
 
-        let counter_marker = ptr.as_ref().counter_marker();
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting {
                 root_list,
@@ -722,7 +640,7 @@ impl CcOnHeap<()> {
             ContextInner::RootTracing { non_root_list, root_list } => {
                 if counter_marker.is_traced() {
                     // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
-                    // NonMarked will avoid tracing this CcOnHeap again (thanks to the if condition)
+                    // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
                     counter_marker.mark(Mark::NonMarked);
 
                     if non_root(counter_marker) {
@@ -742,21 +660,23 @@ impl CcOnHeap<()> {
     }
 }
 
-// Trait used to make it possible to drop/finalize only the elem field of CcOnHeap
-// and without taking a &mut reference to the whole CcOnHeap
+// Trait used to make it possible to drop/finalize only the elem field of CcBox
+// and without taking a &mut reference to the whole CcBox
 trait InternalTrace: Trace {
+    #[cfg(feature = "finalization")]
     fn finalize_elem(&self);
 
     /// Safety: see `drop_in_place`
     unsafe fn drop_elem(&self);
 }
 
-impl<T: ?Sized + Trace + 'static> InternalTrace for CcOnHeap<T> {
+impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
+    #[cfg(feature = "finalization")]
     fn finalize_elem(&self) {
         self.get_elem().finalize();
     }
 
     unsafe fn drop_elem(&self) {
-        drop_in_place(self.elem.get());
+        drop_in_place(self.get_elem_mut());
     }
 }

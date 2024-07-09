@@ -1,37 +1,39 @@
-use std::cell::Cell;
+use core::cell::Cell;
 
 use crate::utils;
 
 const NON_MARKED: u32 = 0u32;
-const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 3);
-const TRACED: u32 = 2u32 << (u32::BITS - 3);
-const INVALID: u32 = 0b111u32 << (u32::BITS - 3);
+const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 2);
+const TRACED: u32 = 2u32 << (u32::BITS - 2);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
 const TRACING_COUNTER_MASK: u32 = COUNTER_MASK << 14; // 14 bits set to 1 followed by 14 bits set to 0
 const FINALIZED_MASK: u32 = 1u32 << (u32::BITS - 4);
-const BITS_MASK: u32 = !(COUNTER_MASK | TRACING_COUNTER_MASK | FINALIZED_MASK);
-const FIRST_TWO_BITS_MASK: u32 = 3u32 << (u32::BITS - 2);
+const DROPPED_MASK: u32 = 1u32 << (u32::BITS - 3);
+const BITS_MASK: u32 = !(COUNTER_MASK | TRACING_COUNTER_MASK | FINALIZED_MASK | DROPPED_MASK);
+const FIRST_BIT_MASK: u32 = 1u32 << (u32::BITS - 1);
 
 const INITIAL_VALUE: u32 = COUNTER_MASK + 2; // +2 means that tracing counter and counter are both set to 1
+const INITIAL_VALUE_FINALIZED: u32 = INITIAL_VALUE | FINALIZED_MASK;
 
-const MAX: u32 = COUNTER_MASK;
+// pub(crate) to make it available in tests
+pub(crate) const MAX: u32 = COUNTER_MASK;
 
 /// Internal representation:
 /// ```text
-/// +-----------+----------+------------+------------+
-/// | A: 3 bits | B: 1 bit | C: 14 bits | D: 14 bits |  Total: 32 bits
-/// +-----------+----------+------------+------------+
+/// +-----------+----------+----------+------------+------------+
+/// | A: 2 bits | B: 1 bit | C: 1 bit | D: 14 bits | E: 14 bits |  Total: 32 bits
+/// +-----------+----------+----------+------------+------------+
 /// ```
 ///
-/// * `A` has 4 possible states:
+/// * `A` has 3 possible states:
 ///   * `NON_MARKED`
 ///   * `IN_POSSIBLE_CYCLES` (this implies `NON_MARKED`)
 ///   * `TRACED`
-///   * `INVALID` (`CcOnHeap` is invalid)
-/// * `B` is `1` when the element inside `CcOnHeap` has already been finalized, `0` otherwise
-/// * `C` is the tracing counter
-/// * `D` is the counter (last one for sum/subtraction efficiency)
+/// * `B` is `1` when the element inside `CcBox` has already been dropped, `0` otherwise
+/// * `C` is `1` when the element inside `CcBox` has already been finalized, `0` otherwise
+/// * `D` is the tracing counter
+/// * `E` is the counter (last one for sum/subtraction efficiency)
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub(crate) struct CounterMarker {
@@ -43,9 +45,13 @@ pub(crate) struct OverflowError;
 impl CounterMarker {
     #[inline]
     #[must_use]
-    pub(crate) fn new_with_counter_to_one() -> CounterMarker {
+    pub(crate) fn new_with_counter_to_one(already_finalized: bool) -> CounterMarker {
         CounterMarker {
-            counter: Cell::new(INITIAL_VALUE),
+            counter: Cell::new(if !already_finalized {
+                INITIAL_VALUE
+            } else {
+                INITIAL_VALUE_FINALIZED
+            }),
         }
     }
 
@@ -115,43 +121,50 @@ impl CounterMarker {
         (self.counter.get() & BITS_MASK) == IN_POSSIBLE_CYCLES
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn needs_finalization(&self) -> bool {
         (self.counter.get() & FINALIZED_MASK) == 0u32
     }
 
+    #[cfg(feature = "finalization")]
     #[inline]
     pub(crate) fn set_finalized(&self, finalized: bool) {
-        if finalized {
-            self.counter.set(self.counter.get() | FINALIZED_MASK);
+        self.set_bit(finalized, FINALIZED_MASK);
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline]
+    pub(crate) fn is_dropped(&self) -> bool {
+        (self.counter.get() & DROPPED_MASK) == DROPPED_MASK
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline]
+    pub(crate) fn set_dropped(&self, dropped: bool) {
+        self.set_bit(dropped, DROPPED_MASK);
+    }
+
+    #[cfg(any(feature = "weak-ptr", feature = "finalization"))]
+    #[inline(always)]
+    fn set_bit(&self, value: bool, mask: u32) {
+        if value {
+            self.counter.set(self.counter.get() | mask);
         } else {
-            self.counter.set(self.counter.get() & !FINALIZED_MASK);
+            self.counter.set(self.counter.get() & !mask);
         }
     }
 
     #[inline]
     pub(crate) fn is_not_marked(&self) -> bool {
-        // true if (self.counter & BITS_MASK) is equal to 001 or 000,
-        // so if the first two bits are both 0
-        (self.counter.get() & FIRST_TWO_BITS_MASK) == 0u32
-    }
-
-    /// Returns whether this CounterMarker is traced or not valid (exclusive or).
-    #[inline]
-    pub(crate) fn is_traced_or_invalid(&self) -> bool {
-        // true if (self.counter & BITS_MASK) is equal to 010, 011, 100, 101 or 111,
-        // so if the first two bits aren't both 0
-        (self.counter.get() & FIRST_TWO_BITS_MASK) != 0u32
+        // true if (self.counter & BITS_MASK) is equal to 01 or 00,
+        // so if the first bit is 0
+        (self.counter.get() & FIRST_BIT_MASK) == 0u32
     }
 
     #[inline]
     pub(crate) fn is_traced(&self) -> bool {
         (self.counter.get() & BITS_MASK) == TRACED
-    }
-
-    #[inline]
-    pub(crate) fn is_valid(&self) -> bool {
-        (self.counter.get() & BITS_MASK) != INVALID
     }
 
     #[inline]
@@ -166,5 +179,4 @@ pub(crate) enum Mark {
     NonMarked = NON_MARKED,
     PossibleCycles = IN_POSSIBLE_CYCLES,
     Traced = TRACED,
-    Invalid = INVALID,
 }

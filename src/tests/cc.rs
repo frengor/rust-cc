@@ -1,7 +1,3 @@
-use std::mem::MaybeUninit;
-use std::ops::Deref;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
 use super::*;
 use crate::*;
 
@@ -152,7 +148,8 @@ fn test_trait_object() {
     struct MyTraitObject(u8);
 
     unsafe impl Trace for MyTraitObject {
-        fn trace(&self, _: &mut Context<'_>) {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.0.trace(ctx);
             TRACED.with(|traced| traced.set(true));
         }
     }
@@ -223,7 +220,7 @@ fn test_trait_object() {
     );
 }
 
-#[test]
+/*#[test]
 fn test_cyclic() {
     reset_state();
 
@@ -282,14 +279,14 @@ fn test_cyclic() {
 
     drop(cc);
     collect_cycles();
-}
+}*/
 
 #[test]
 fn test_cyclic_finalization_aliasing() {
     reset_state();
 
     struct Circular {
-        cc: Cc<Circular>,
+        cc: RefCell<Option<Cc<Circular>>>,
     }
 
     unsafe impl Trace for Circular {
@@ -304,15 +301,20 @@ fn test_cyclic_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.cc.cc.cc.cc.strong_count() >= 0);
+            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
         }
     }
 
-    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-        cc: Cc::new(Circular {
-            cc: cc.clone(),
-        }),
-    });
+    {
+        let cc = Cc::new(Circular {
+            cc: RefCell::new(None),
+        });
+
+        *cc.cc.borrow_mut() = Some(Cc::new(Circular {
+            cc: RefCell::new(Some(cc.clone())),
+        }));
+    }
+
     collect_cycles();
 }
 
@@ -321,7 +323,7 @@ fn test_self_loop_finalization_aliasing() {
     reset_state();
 
     struct Circular {
-        cc: Cc<Circular>,
+        cc: RefCell<Option<Cc<Circular>>>,
     }
 
     unsafe impl Trace for Circular {
@@ -336,31 +338,114 @@ fn test_self_loop_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.cc.cc.cc.strong_count() >= 0);
+            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
         }
     }
 
-    let _ = Cc::<Circular>::new_cyclic(|cc| Circular {
-        cc: cc.clone(),
-    });
+    {
+        let cc = Cc::new(Circular {
+            cc: RefCell::new(None),
+        });
+        *cc.cc.borrow_mut() = Some(cc.clone());
+    }
+
     collect_cycles();
 }
 
 #[test]
-fn test_assume_init() {
+fn no_cyclic_finalization_ends() {
     reset_state();
 
-    let cc = Cc::new(MaybeUninit::<u32>::new(42));
-    // SAFETY: cc is already initialized
-    let cc = unsafe { cc.assume_init() };
-    assert_eq!(*cc, 42);
+    struct ToFinalize;
+
+    unsafe impl Trace for ToFinalize {
+        fn trace(&self, _: &mut Context<'_>) {
+            panic!("Trace shouldn't have been called on ToFinalize.");
+        }
+    }
+
+    impl Finalize for ToFinalize {
+        fn finalize(&self) {
+            let _cc = Cc::new(ToFinalize);
+
+            #[cfg(feature = "finalization")]
+            assert!(_cc.already_finalized());
+        }
+    }
+
+    let _ = Cc::new(ToFinalize);
 }
 
 #[test]
-fn test_init() {
+fn cyclic_finalization_ends() {
     reset_state();
 
-    let cc = Cc::new(MaybeUninit::<u32>::uninit());
-    let cc = cc.init(42);
-    assert_eq!(*cc, 42);
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
+    }
+
+    impl Cyclic {
+        fn new() -> Cc<Cyclic> {
+            let cc = Cc::new(Cyclic {
+                cyclic: RefCell::new(None),
+            });
+            *cc.cyclic.borrow_mut() = Some(cc.clone());
+            cc
+        }
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            let _cc = Cyclic::new();
+
+            #[cfg(feature = "finalization")]
+            assert!(_cc.already_finalized());
+        }
+    }
+
+    let _ = Cyclic::new();
+    collect_cycles();
+}
+
+#[test]
+fn buffered_objects_count_test() {
+    reset_state();
+
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+    }
+
+    assert_eq!(0, state::buffered_objects_count().unwrap());
+
+    let cc = {
+        let cc = Cc::new(Cyclic {
+            cyclic: RefCell::new(None),
+        });
+        *cc.cyclic.borrow_mut() = Some(cc.clone());
+        cc.clone()
+    };
+
+    assert_eq!(1, state::buffered_objects_count().unwrap());
+
+    cc.mark_alive();
+
+    assert_eq!(0, state::buffered_objects_count().unwrap());
+
+    drop(cc);
+    collect_cycles();
 }

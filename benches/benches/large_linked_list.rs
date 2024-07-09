@@ -1,9 +1,8 @@
 use std::cell::RefCell;
-use std::hint::black_box;
 
 use rust_cc::*;
 
-fn large_linked_list(size: usize) -> Vec<usize> {
+pub fn large_linked_list(size: usize) -> Vec<usize> {
     let mut res = Vec::new();
     for _ in 0..30 {
         let mut list = List::new();
@@ -32,10 +31,13 @@ impl List {
             next: self.head.clone(),
             previous: RefCell::new(None),
         });
-        if let Node::Cons{ previous, .. } = &*self.head {
+        if let Node::Cons { previous, .. } = &*self.head {
             *previous.borrow_mut() = Some(cons.clone());
         }
         self.head = cons;
+        if let Node::Cons { next, .. } = &*self.head {
+            next.mark_alive();
+        }
     }
 
     fn len(&self) -> usize {
@@ -43,6 +45,7 @@ impl List {
     }
 }
 
+#[derive(Trace, Finalize)]
 enum Node {
     Cons { next: Cc<Node>, previous: RefCell<Option<Cc<Node>>> },
     Nil,
@@ -57,22 +60,4 @@ impl Node {
             _ => 0,
         }
     }
-}
-
-unsafe impl Trace for Node {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        match self {
-            Self::Cons { next, previous } => {
-                next.trace(ctx);
-                previous.trace(ctx);
-            },
-            Self::Nil => {},
-        }
-    }
-}
-
-impl Finalize for Node {}
-
-pub fn benchmark_large_linked_list() {
-    large_linked_list(black_box(4096));
 }

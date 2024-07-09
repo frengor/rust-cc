@@ -17,11 +17,12 @@ jobs:
           rustup toolchain install nightly --component miri
           rustup override set nightly
           cargo miri setup
-      - name: Run tests (no features)
-        run: cargo miri test --no-default-features -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (default features)
-        run: cargo miri test -F pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (feature full)
-        run: cargo miri test -F full,pedantic-debug-assertions --verbose --workspace
-      - name: Run tests (every feature)
-        run: cargo miri test --all-features --verbose --workspace
+      - uses: taiki-e/install-action@cargo-hack
+      # Always skip "derive" since derive macro tests are skipped on Miri
+      # Also always keep "pedantic-debug-assertions" enabled to reduce build times
+      # Note: no need to use --workspace here, since there's no unsafe in rust-cc-derive
+      - name: Run tests
+        # Keep "std" feature always enabled here to avoid needing the no-std related nightly features
+        run: cargo hack miri test --feature-powerset --skip nightly,derive --verbose -F std,pedantic-debug-assertions
+      - name: Run tests (nightly)
+        run: cargo hack miri test --feature-powerset --skip derive --verbose -F nightly,pedantic-debug-assertions

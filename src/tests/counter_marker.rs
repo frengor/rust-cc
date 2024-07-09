@@ -1,40 +1,70 @@
 use crate::counter_marker::*;
 
-// This const is used only in a part of test_increment_decrement() which is
-// disabled under MIRI (since it is very slow and doesn't really use unsafe).
-// Thus, the cfg attribute removes the constant when running under MIRI to
-// disable the "unused const" warning
-#[cfg(not(miri))]
-const MAX: u32 = 0b11111111111111; // 14 ones
-
 #[test]
 fn test_new() {
     fn test(counter: CounterMarker) {
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         assert_eq!(counter.counter(), 1);
         assert_eq!(counter.tracing_counter(), 1);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
+#[cfg(feature = "finalization")]
 #[test]
 fn test_is_to_finalize() {
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
     assert!(counter.needs_finalization());
 
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
     counter.set_finalized(true);
     assert!(!counter.needs_finalization());
 
-    let counter = CounterMarker::new_with_counter_to_one();
+    let counter = CounterMarker::new_with_counter_to_one(false);
     counter.set_finalized(false);
     assert!(counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    assert!(!counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_finalized(true);
+    assert!(!counter.needs_finalization());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_finalized(false);
+    assert!(counter.needs_finalization());
+}
+
+#[cfg(feature = "weak-ptr")]
+#[test]
+fn test_is_dropped() {
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    counter.set_dropped(true);
+    assert!(counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(false);
+    counter.set_dropped(false);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    assert!(!counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_dropped(true);
+    assert!(counter.is_dropped());
+
+    let counter = CounterMarker::new_with_counter_to_one(true);
+    counter.set_dropped(false);
+    assert!(!counter.is_dropped());
 }
 
 #[test]
@@ -44,7 +74,6 @@ fn test_increment_decrement() {
             assert!(counter.is_not_marked());
             assert!(!counter.is_in_possible_cycles());
             assert!(!counter.is_traced());
-            assert!(counter.is_valid());
         }
 
         assert_not_marked(&counter);
@@ -111,8 +140,8 @@ fn test_increment_decrement() {
         assert_not_marked(&counter);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
 #[test]
@@ -121,46 +150,34 @@ fn test_marks() {
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
 
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::PossibleCycles);
 
         assert!(counter.is_not_marked());
         assert!(counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::Traced);
 
         assert!(!counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(counter.is_traced());
-        assert!(counter.is_valid());
 
         counter.mark(Mark::NonMarked);
 
         assert!(counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_traced());
-        assert!(counter.is_valid());
-
-        counter.mark(Mark::Invalid);
-
-        assert!(!counter.is_not_marked());
-        assert!(!counter.is_in_possible_cycles());
-        assert!(!counter.is_traced());
-        assert!(!counter.is_valid());
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }
 
 #[test]
@@ -178,6 +195,6 @@ fn test_reset_tracing_counter() {
         assert_eq!(counter.tracing_counter(), 0);
     }
 
-    test(CounterMarker::new_with_counter_to_one());
-    test(CounterMarker::new_with_counter_to_one());
+    test(CounterMarker::new_with_counter_to_one(false));
+    test(CounterMarker::new_with_counter_to_one(false));
 }

@@ -1,31 +1,37 @@
-use std::alloc::Layout;
-use std::cell::Cell;
-use std::thread::AccessError;
-use thiserror::Error;
+//! Information about the garbage collector state.
 
-thread_local! {
-    static STATE: State = State::default();
+use alloc::alloc::Layout;
+use alloc::rc::Rc;
+use core::cell::Cell;
+use core::marker::PhantomData;
+use thiserror::Error;
+use crate::utils;
+
+utils::rust_cc_thread_local! {
+    static STATE: State = const { State::new() };
 }
 
 #[inline]
 pub(crate) fn state<R>(f: impl FnOnce(&State) -> R) -> R {
     // Use try_state instead of state.with(...) since with is not marked as inline
-    try_state(f).unwrap_or_else(|err| panic!("Couldn't access state: {}", err))
+    try_state(f).unwrap_or_else(|_| panic!("Couldn't access the state"))
 }
 
 #[inline]
 pub(crate) fn try_state<R>(f: impl FnOnce(&State) -> R) -> Result<R, StateAccessError> {
-    STATE.try_with(|state| Ok(f(state)))?
+    STATE.try_with(|state| Ok(f(state))).unwrap_or(Err(StateAccessError::AccessError))
 }
 
+/// An error returned by functions accessing the garbage collector state.
 #[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum StateAccessError {
-    #[error(transparent)]
-    AccessError(#[from] AccessError),
+    /// The garbage collector state couldn't be accessed.
+    #[error("couldn't access the state")]
+    AccessError,
 }
 
-#[cfg(test)] // Used in tests
+#[cfg(all(test, feature = "std"))] // Only used in unit tests
 pub(crate) fn reset_state() {
     state(|state| {
         state.collecting.set(false);
@@ -39,7 +45,6 @@ pub(crate) fn reset_state() {
     });
 }
 
-#[derive(Default)]
 pub(crate) struct State {
     collecting: Cell<bool>,
 
@@ -49,9 +54,27 @@ pub(crate) struct State {
     dropping: Cell<bool>,
     allocated_bytes: Cell<usize>,
     executions_counter: Cell<usize>,
+
+    _phantom: PhantomData<Rc<()>>, // Make State !Send and !Sync
 }
 
 impl State {
+    #[inline]
+    const fn new() -> Self {
+        Self {
+            collecting: Cell::new(false),
+
+            #[cfg(feature = "finalization")]
+            finalizing: Cell::new(false),
+
+            dropping: Cell::new(false),
+            allocated_bytes: Cell::new(0),
+            executions_counter: Cell::new(0),
+
+            _phantom: PhantomData,
+        }
+    }
+
     #[inline]
     pub(crate) fn allocated_bytes(&self) -> usize {
         self.allocated_bytes.get()
@@ -110,6 +133,7 @@ impl State {
     }
 
     #[inline]
+    #[allow(dead_code)] // Currently used only inside #[cfg(debug_assertions)], but always keep it
     pub(crate) fn is_tracing(&self) -> bool {
         #[cfg(feature = "finalization")]
         {
@@ -123,14 +147,46 @@ impl State {
     }
 }
 
-#[inline]
-pub fn allocated_bytes() -> Result<usize, StateAccessError> {
-    STATE.try_with(|state| Ok(state.allocated_bytes()))?
+impl Default for State {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
+/// Returns the number of objects buffered to be processed in the next collection.
+///
+/// See [`Cc::mark_alive`][`crate::Cc::mark_alive`] for more details.
+#[inline]
+pub fn buffered_objects_count() -> Result<usize, StateAccessError> {
+    // Expose this in state module even though the count is kept inside POSSIBLE_CYCLES
+    // The error returned in case of failed access is a generic StateAccessError::AccessError
+    crate::POSSIBLE_CYCLES.try_with(|pc| {
+        match pc.try_borrow() {
+            Ok(pc) => Ok(pc.size()),
+            Err(_) => Err(StateAccessError::AccessError),
+        }
+    }).unwrap_or(Err(StateAccessError::AccessError))
+}
+
+/// Returns the number of allocated bytes managed by the garbage collector.
+#[inline]
+pub fn allocated_bytes() -> Result<usize, StateAccessError> {
+    try_state(|state| Ok(state.allocated_bytes()))?
+}
+
+/// Returns the total number of executed collections.
 #[inline]
 pub fn executions_count() -> Result<usize, StateAccessError> {
-    STATE.try_with(|state| Ok(state.executions_count()))?
+    try_state(|state| Ok(state.executions_count()))?
+}
+
+/// Returns `true` if the garbage collector is in a tracing phase, `false` otherwise.
+///
+/// See [`Trace`][`trait@crate::Trace`] for more details.
+#[inline]
+pub fn is_tracing() -> Result<bool, StateAccessError> {
+    try_state(|state| Ok(state.is_tracing()))?
 }
 
 /// Utility macro used internally to implement drop guards that accesses the state
@@ -152,7 +208,7 @@ macro_rules! replace_state_field {
                 old_value: $field_type,
             }
 
-            impl<'a> ::std::ops::Drop for DropGuard<'a> {
+            impl<'a> ::core::ops::Drop for DropGuard<'a> {
                 #[inline]
                 fn drop(&mut self) {
                     $crate::state::State::$set_name(self.state, self.old_value);

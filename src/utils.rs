@@ -1,13 +1,13 @@
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use std::ptr::NonNull;
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use core::ptr::NonNull;
 
-use crate::{CcOnHeap, Trace};
-use crate::state::{state, State};
+use crate::{CcBox, Trace};
+use crate::state::State;
 
 #[inline]
-pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout) -> NonNull<CcOnHeap<T>> {
-    state(|state| state.record_allocation(layout));
-    match NonNull::new(alloc(layout) as *mut CcOnHeap<T>) {
+pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State) -> NonNull<CcBox<T>> {
+    state.record_allocation(layout);
+    match NonNull::new(alloc(layout) as *mut CcBox<T>) {
         Some(ptr) => ptr,
         None => handle_alloc_error(layout),
     }
@@ -15,7 +15,7 @@ pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout) -> NonNull<CcO
 
 #[inline]
 pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
-    ptr: NonNull<CcOnHeap<T>>,
+    ptr: NonNull<CcBox<T>>,
     layout: Layout,
     state: &State
 ) {
@@ -23,6 +23,159 @@ pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
     dealloc(ptr.cast().as_ptr(), layout);
 }
 
+#[cfg(any(feature = "weak-ptr", feature = "cleaners"))]
+#[inline]
+pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
+    let layout = Layout::new::<T>();
+    match NonNull::new(alloc(layout) as *mut T) {
+        Some(ptr) => ptr,
+        None => handle_alloc_error(layout),
+    }
+}
+
+#[cfg(any(feature = "weak-ptr", feature = "cleaners"))]
+#[inline]
+pub(crate) unsafe fn dealloc_other<T>(ptr: NonNull<T>) {
+    let layout = Layout::new::<T>();
+    dealloc(ptr.cast().as_ptr(), layout);
+}
+
 #[inline(always)]
 #[cold]
 pub(crate) fn cold() {}
+
+#[cfg(feature = "std")]
+pub(crate) use std::thread_local as rust_cc_thread_local; // Use the std's macro when std is enabled
+
+#[cfg(not(feature = "std"))]
+macro_rules! rust_cc_thread_local {
+    // Same cases as std's thread_local macro
+
+    () => {};
+
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = const { $init:expr }; $($rest:tt)*) => (
+        $crate::utils::rust_cc_thread_local!($(#[$attr])* $vis static $name: $t = const { $init });
+        $crate::utils::rust_cc_thread_local!($($rest)*);
+    );
+
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = const { $init:expr }) => (
+        $crate::utils::rust_cc_thread_local!($(#[$attr])* $vis static $name: $t = $init);
+    );
+
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = $init:expr; $($rest:tt)*) => (
+        $crate::utils::rust_cc_thread_local!($(#[$attr])* $vis static $name: $t = $init);
+        $crate::utils::rust_cc_thread_local!($($rest)*);
+    );
+
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty = $init:expr) => (
+        #[allow(clippy::declare_interior_mutable_const)]
+        const INIT: $t = $init;
+
+        #[thread_local]
+        $(#[$attr])* $vis static $name: $crate::utils::NoStdLocalKey<$t> = $crate::utils::NoStdLocalKey::new(INIT);
+    );
+}
+
+#[cfg(not(feature = "std"))]
+pub(crate) use {
+    rust_cc_thread_local, // When std is not enabled, use the custom macro which uses the #[thread_local] attribute
+    no_std_thread_locals::*,
+};
+
+#[cfg(not(feature = "std"))]
+#[allow(dead_code)]
+mod no_std_thread_locals {
+    // Implementation of LocalKey for no-std to allow to easily switch from the std's thread_local macro to rust_cc_thread_local
+
+    #[non_exhaustive]
+    #[derive(Clone, Copy, Eq, PartialEq, Debug)]
+    pub(crate) struct AccessError;
+
+    pub(crate) struct NoStdLocalKey<T: 'static> {
+        value: T,
+    }
+
+    impl<T: 'static> NoStdLocalKey<T> {
+        #[inline(always)]
+        pub(crate) const fn new(value: T) -> Self {
+            NoStdLocalKey { value }
+        }
+
+        #[inline]
+        pub(crate) fn with<F, R>(&self, f: F) -> R
+            where
+            F: FnOnce(&T) -> R,
+        {
+            f(&self.value)
+        }
+
+        #[inline]
+        pub(crate) fn try_with<F, R>(&self, f: F) -> Result<R, AccessError>
+            where
+            F: FnOnce(&T) -> R,
+        {
+            Ok(f(&self.value))
+        }
+    }
+}
+
+#[cfg(all(test, not(feature = "std")))]
+mod no_std_tests {
+    use core::cell::Cell;
+    use super::no_std_thread_locals::NoStdLocalKey;
+
+    rust_cc_thread_local! {
+        static VAL: Cell<i32> = Cell::new(3);
+    }
+
+    #[test]
+    fn check_type() {
+        // Make sure we're using the right macro
+        fn a(_: &NoStdLocalKey<Cell<i32>>) {}
+        a(&VAL);
+    }
+
+    #[test]
+    fn test_with() {
+        let i = VAL.with(|i| {
+            i.get()
+        });
+        assert_eq!(3, i);
+        let i = VAL.with(|i| {
+            i.set(i.get() + 1);
+            i.get()
+        });
+        assert_eq!(4, i);
+    }
+
+    #[test]
+    fn test_try_with() {
+        let i = VAL.try_with(|i| {
+            i.get()
+        }).unwrap();
+        assert_eq!(3, i);
+        let i = VAL.try_with(|i| {
+            i.set(i.get() + 1);
+            i.get()
+        }).unwrap();
+        assert_eq!(4, i);
+    }
+
+    #[test]
+    fn test_with_nested() {
+        let i = VAL.with(|i| {
+            i.set(VAL.with(|ii| ii.get()) + 1);
+            i.get()
+        });
+        assert_eq!(4, i);
+    }
+
+    #[test]
+    fn test_try_with_nested() {
+        let i = VAL.try_with(|i| {
+            i.set(VAL.try_with(|ii| ii.get()).unwrap() + 1);
+            i.get()
+        }).unwrap();
+        assert_eq!(4, i);
+    }
+}

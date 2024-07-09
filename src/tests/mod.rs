@@ -1,11 +1,12 @@
 #![cfg(test)]
 
+use std::rc::Rc;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use crate::trace::Trace;
-use crate::{state, Cc, Context, Finalize, List, POSSIBLE_CYCLES};
+use crate::list::*;
+use crate::{state, Cc, Context, Finalize, POSSIBLE_CYCLES};
 use crate::state::state;
 
 mod bench_code;
@@ -14,9 +15,15 @@ mod list;
 mod panicking;
 mod counter_marker;
 
+#[cfg(feature = "weak-ptr")]
+mod weak;
+
+#[cfg(feature = "cleaners")]
+mod cleaners;
+
 pub(crate) fn reset_state() {
     POSSIBLE_CYCLES.with(|pc| {
-        pc.replace(List::new());
+        pc.replace(CountedList::new());
     });
     state::reset_state();
 
@@ -30,14 +37,14 @@ pub(crate) fn reset_state() {
 pub(crate) struct Droppable<T: Trace> {
     inner: T,
     #[allow(unused)]
-    finalize: Arc<Cell<bool>>,
-    drop: Arc<Cell<bool>>,
+    finalize: Rc<Cell<bool>>,
+    drop: Rc<Cell<bool>>,
 }
 
 impl<T: Trace> Droppable<T> {
     pub(crate) fn new(t: T) -> (Droppable<T>, DropChecker) {
-        let finalize = Arc::new(Cell::new(false));
-        let drop = Arc::new(Cell::new(false));
+        let finalize = Rc::new(Cell::new(false));
+        let drop = Rc::new(Cell::new(false));
         (
             Droppable {
                 inner: t,
@@ -94,8 +101,8 @@ impl<T: Trace> Drop for Droppable<T> {
 
 pub(crate) struct DropChecker {
     #[allow(unused)]
-    finalize: Arc<Cell<bool>>,
-    drop: Arc<Cell<bool>>,
+    finalize: Rc<Cell<bool>>,
+    drop: Rc<Cell<bool>>,
 }
 
 impl DropChecker {
@@ -130,6 +137,7 @@ pub(crate) fn assert_collecting() {
 }
 
 pub(crate) fn assert_tracing() {
+    assert!(state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(state.is_tracing());
 
@@ -142,6 +150,7 @@ pub(crate) fn assert_tracing() {
 
 #[cfg(feature = "finalization")]
 pub(crate) fn assert_finalizing() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_tracing());
         assert!(state.is_finalizing());
@@ -150,6 +159,7 @@ pub(crate) fn assert_finalizing() {
 }
 
 pub(crate) fn assert_dropping() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_tracing());
 
@@ -161,6 +171,7 @@ pub(crate) fn assert_dropping() {
 }
 
 pub(crate) fn assert_state_not_collecting() {
+    assert!(!state::is_tracing().ok().unwrap());
     state(|state| {
         assert!(!state.is_collecting());
         assert!(!state.is_tracing());

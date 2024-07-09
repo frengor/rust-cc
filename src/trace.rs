@@ -1,176 +1,136 @@
-use std::cell::RefCell;
-use std::ffi::{CStr, CString, OsStr, OsString};
-use std::marker::PhantomData;
-use std::mem::{ManuallyDrop, MaybeUninit};
-use std::num::{
+use core::cell::RefCell;
+use core::ffi::CStr;
+use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::num::{
     NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU128,
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
-use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{
+use core::panic::AssertUnwindSafe;
+use core::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
+};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use alloc::ffi::CString;
+use alloc::string::String;
+#[cfg(feature = "std")]
+use std::{
+    path::{Path, PathBuf},
+    ffi::{OsStr, OsString}
 };
 
 use crate::List;
 
+/// Trait to finalize objects before freeing them.
+///
+/// Must be always implemented for every cycle-collectable object, even when `finalization` is disabled, to avoid cross-crate incompatibilities.
+/// When `finalization` is disabled, the [`finalize`] method will *never* be called.
+///
+/// # Derive macro
+///
+/// The [`Finalize`][`macro@crate::Finalize`] derive macro can be used to implement an empty finalizer:
+#[cfg_attr(
+    feature = "derive",
+    doc = r"```rust"
+)]
+#[cfg_attr(
+    not(feature = "derive"),
+    doc = r"```rust,ignore"
+)]
+#[doc = r"# use rust_cc::*;
+# use rust_cc_derive::*;
+#[derive(Finalize)]
+struct Foo {
+    // ...
+}
+```"]
+///
+/// [`finalize`]: Finalize::finalize
 pub trait Finalize {
+    /// The finalizer, which is called after an object becomes garbage and before [`drop`]ing it.
+    ///
+    /// By default, objects are finalized only once. Use the method [`Cc::finalize_again`] to make finalization happen again for a certain object.
+    /// Also, objects created during the execution of a finalizer are not automatically finalized.
+    /// 
+    /// # Default implementation
+    ///
+    /// The default implementation is empty.
+    ///
+    /// [`drop`]: core::ops::Drop::drop
+    /// [`Cc::finalize_again`]: crate::Cc::finalize_again
     #[inline(always)]
     fn finalize(&self) {}
 }
 
 /// Trait to trace cycle-collectable objects.
 ///
-/// Implementors should only call the [`trace`] method of every [`Cc`] owned **only** by the implementing struct.
+/// This trait is unsafe to implement, but can be safely derived using the [`Trace`][`macro@crate::Trace`] derive macro, which calls the [`trace`] method on every field:
+#[cfg_attr(
+    feature = "derive",
+    doc = r"```rust"
+)]
+#[cfg_attr(
+    not(feature = "derive"),
+    doc = r"```rust,ignore"
+)]
+#[doc = r"# use rust_cc::*;
+# use rust_cc_derive::*;
+# #[derive(Finalize)]
+#[derive(Trace)]
+struct Foo<A: Trace + 'static, B: Trace + 'static> {
+    a_field: Cc<A>,
+    another_field: Cc<B>,
+}
+```"]
 ///
-/// This trait is already implemented for common types from the standard lib.
-///
-/// Remember that creating, cloning, or accessing the contents of a [`Cc`] from inside of [`trace`] will produce a panic,
-/// since it is run during cycle collection.
+/// This trait is already implemented for common types from the standard library.
 ///
 /// # Safety
-/// This trait is unsafe *to implement* because it's not possible to check the following invariants:
-///   * The [`trace`] function *should* be called **only once** on every [`Cc`] **owned only** by the implementing struct.
+/// The implementations of this trait must uphold the following invariants:
+///   * The [`trace`] implementation can trace (maximum once) every [`Cc`] instance *exclusively* owned by `self`.
+///     No other [`Cc`] instance can be traced.
+///   * It's always safe to panic.
+///   * During the same tracing phase (see below), two different [`trace`] calls on the same value must *behave the same*, i.e. they must trace the same
+///     [`Cc`] instances.  
+///     If a panic happens during the second of such [`trace`] calls but not in the first one, then the [`Cc`] instances traced during the second call
+///     must be a subset of the [`Cc`] instances traced in the first one.  
+///     Tracing can be detected using the [`state::is_tracing`] function. If it never returned `false` between two [`trace`] calls
+///     on the same value, then they are part of the same tracing phase.
+///   * The [`trace`] implementation must not create, clone, dereference or drop any [`Cc`].
+///   * If the implementing type implements [`Drop`], then the [`Drop::drop`] implementation must not create, clone, move, dereference, drop or call
+///     any method on any [`Cc`] instance.
 ///
-///     For example, a [`Cc`] inside a [`Box`] (so a `Box<Cc>`) is owned *only* by the implementing struct.
-///     However, a [`Cc`] inside an [`Rc`] (so a `Rc<Cc>`) *isn't* owned *only* by the implementing struct, so it mustn't be traced.
+/// # Implementation tips
+/// It is almost always preferable to use the derive macro `#[derive(Trace)]`, but in case a manual implementation is needed the following suggestions usually apply:
+///   * If a field's type implements [`Trace`], then call its [`trace`] method.
+///   * Try to avoid panicking if not strictly necessary, since it may lead to memory leaks.
+///   * Avoid mixing [`Cc`]s with other shared-ownership smart pointers like [`Rc`] (a [`Cc`] contained inside an [`Rc`] cannot be traced,
+///     since it's not owned *exclusively*).
+///   * Never tracing a field is always safe.
+///   * If you need to perform any clean up actions, you should do them in the [`Finalize::finalize`] implementation (instead of inside [`Drop::drop`])
+///     or using a [cleaner](crate::cleaners).
 ///
-///     In general, mixing other shared-ownership smart pointers with [`Cc`]s is not possible and will (almost surely) lead to UB.
-///   * If a [`Cc`] is not traced in *any* execution, then it must be skipped in *any other* execution *except* if any user function other
-///     than [`trace`] is called in between. So, for example, two [`trace`] calls with a [`finalize`] call in between may trace different [`Cc`]s.
-///     Note that skipping [`trace`] calls *may* leak memory, but it's better than UB.
+/// # Derive macro compatibility
+/// In order to improve the `Trace` derive macro usability and error messages, it is suggested to avoid implementing this trait for references or raw pointers
+/// (also considering that no pointed [`Cc`] may be traced, since a reference doesn't own what it refers to).
 ///
-///     Another possibility is to *panic* instead of skipping. That will halt the collection (potentially leaking memory), but it's safe.
-///   * The [`trace`] function *must not* mutate the implementing struct's contents, even if it has [interior mutability].
-///   * If the implementing struct implements [`Drop`], then the [`Drop`] implementation *must not* move or access any [`Cc`].
-///     Ignoring this will almost surely produce use-after-free. If you need this feature, implement the [`Finalize`] trait
-///     instead of [`Drop`]. Erroneous implementations of [`Drop`] are avoided using the `#[derive(Trace)]` macro,
-///     since it always emits an empty [`Drop`] implementation for the implementing struct.
-///
-/// For some erroneous implementation examples of this trait, see [Erroneous implementation examples](#erroneous-implementation-examples) down below.
-///
-/// # Example
-/// ```rust
-///# use rust_cc::*;
-/// struct Example {
-///     an_elem: i32,
-///     cc_elem: Cc<i32>,
-///     optional_elem: Option<Box<i32>>,
-///     optional_cc_elem: Option<Cc<i32>>,
-/// }
-///
-/// unsafe impl Trace for Example {
-///     fn trace(&self, ctx: &mut Context) {
-///         // an_elem is an i32, there's no need to trace it
-///         self.cc_elem.trace(ctx);
-///         // optional_elem doesn't contain a Cc, no need to trace it
-///         self.optional_cc_elem.trace(ctx);
-///     }
-/// }
-///# impl Finalize for Example {}
-/// ```
-///
-/// # Erroneous implementation examples
-/// ```rust,no_run
-///# use std::ops::Deref;
-///# use rust_cc::*;
-/// struct ErroneousExample {
-///     cc_elem: Cc<i32>,
-///     my_struct_elem: MyStruct,
-///     a_cc_struct_elem: Cc<ACcStruct>,
-///     ignored_cc: Cc<u64>,
-/// }
-///
-/// struct MyStruct;
-///
-/// unsafe impl Trace for MyStruct {
-///    fn trace(&self, _ctx: &mut Context) {
-///        // No fields, no trace() methods to call
-///    }
-/// }
-///# impl Finalize for MyStruct {}
-///
-/// struct ACcStruct {
-///    cc: Cc<i32>,
-/// }
-///
-/// unsafe impl Trace for ACcStruct {
-///    fn trace(&self, ctx: &mut Context) {
-///        self.cc.trace(ctx);
-///    }
-/// }
-///# impl Finalize for ACcStruct {}
-///
-/// unsafe impl Trace for ErroneousExample {
-///     fn trace(&self, ctx: &mut Context) {
-///         self.cc_elem.trace(ctx); // Correct call
-///         self.my_struct_elem.trace(ctx); // Useless since MyStruct is a ZST, but still fine
-///
-///         let new_cc = Cc::new(10); // This will panic to avoid undefined behavior! ⚠️
-///         new_cc.trace(ctx); // If the previous line didn't panic, this call would have produced undefined behavior
-///
-///         self.a_cc_struct_elem.trace(ctx); // Correct call
-///         self.a_cc_struct_elem.trace(ctx); // Double tracing of the same Cc, undefined behavior! ⚠️
-///
-///         // It's safe to **always** ignore a field, although this may cause memory leaks
-///         // self.ignored_cc.trace(ctx);
-///     }
-/// }
-///# impl Finalize for ErroneousExample {}
-/// ```
-///
-/// ```rust,no_run
-///# use std::cell::Cell;
-///# use rust_cc::*;
-/// struct Foo {
-///     cc: Cell<Option<Cc<u64>>>,
-/// }
-///
-/// unsafe impl Trace for Foo {
-///     fn trace(&self, ctx: &mut Context) {
-///         let _ = self.cc.take(); // Modifying self, undefined behavior! ⚠️
-///     }
-/// }
-///# impl Finalize for Foo {}
-/// ```
-///
-/// ```rust,no_run
-///# use std::cell::RefCell;
-///# use rust_cc::*;
-/// struct Foo {
-///     cc: RefCell<Option<Cc<u64>>>,
-/// }
-///
-/// unsafe impl Trace for Foo {
-///     fn trace(&self, ctx: &mut Context) {
-///         self.cc.trace(ctx); // Correct trace implementation, but...
-///     }
-/// }
-///# impl Finalize for Foo {}
-///
-/// impl Drop for Foo {
-///     fn drop(&mut self) {
-///         let _ = self.cc.take(); // A Cc has been moved inside Drop, undefined behavior! ⚠️
-///     }
-/// }
-/// ```
-///
-/// [interior mutability]: https://doc.rust-lang.org/reference/interior-mutability.html
-/// [`self`]: https://doc.rust-lang.org/std/keyword.self.html
 /// [`trace`]: crate::Trace::trace
-/// [`Finalize`]: crate::Finalize
-/// [`finalize`]: crate::Finalize::finalize
+/// [`state::is_tracing`]: crate::state::is_tracing
+/// [`Finalize::finalize`]: crate::Finalize::finalize
 /// [`Cc`]: crate::Cc
-/// [`Drop`]: std::ops::Drop
-/// [`Rc`]: std::rc::Rc
-/// [`Box`]: std::boxed::Box
-/// [`drop`]: std::ops::Drop::drop
+/// [`Drop`]: core::ops::Drop
+/// [`Rc`]: alloc::rc::Rc
+/// [`Drop::drop`]: core::ops::Drop::drop
 pub unsafe trait Trace: Finalize {
+    /// Traces the contained [`Cc`]s. See [`Trace`] for more information.
+    ///
+    /// [`Cc`]: crate::Cc
     fn trace(&self, ctx: &mut Context<'_>);
 }
 
-/// Struct for tracing context.
+/// The tracing context provided to every invocation of [`Trace::trace`].
 pub struct Context<'a> {
     inner: ContextInner<'a>,
     _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
@@ -243,12 +203,8 @@ empty_trace! {
     f64,
     char,
     str,
-    Path,
     CStr,
-    OsStr,
     String,
-    PathBuf,
-    OsString,
     CString,
     NonZeroIsize,
     NonZeroUsize,
@@ -275,7 +231,17 @@ empty_trace! {
     AtomicU64,
 }
 
-unsafe impl<T> Trace for MaybeUninit<T> {
+#[cfg(feature = "std")]
+empty_trace! {
+    Path,
+    OsStr,
+    PathBuf,
+    OsString,
+}
+
+// Removed since these impls are error-prone. Making a Cc<MaybeUninit<T>> and then casting it to Cc<T>
+// doesn't make T traced during tracing, since the impls for MaybeUninit are empty and the vtable is saved when calling Cc::new
+/*unsafe impl<T> Trace for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {}
@@ -285,7 +251,7 @@ impl<T> Finalize for MaybeUninit<T> {
     /// This does nothing, since memory may be uninit.
     #[inline(always)]
     fn finalize(&self) {}
-}
+}*/
 
 unsafe impl<T> Trace for PhantomData<T> {
     #[inline(always)]
@@ -300,7 +266,7 @@ macro_rules! deref_trace {
         {
             #[inline]
             fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
-                let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
+                let deref: &$generic = <$this as ::core::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Trace>::trace(deref, ctx);
             }
         }
@@ -309,7 +275,7 @@ macro_rules! deref_trace {
         {
             #[inline]
             fn finalize(&self) {
-                let deref: &$generic = <$this as ::std::ops::Deref>::deref(self);
+                let deref: &$generic = <$this as ::core::ops::Deref>::deref(self);
                 <$generic as $crate::trace::Finalize>::finalize(deref);
             }
         }
@@ -319,7 +285,7 @@ macro_rules! deref_trace {
 macro_rules! deref_traces {
     ($($this:tt),*,) => {
         $(
-            deref_trace!{T; $this<T>; ?::std::marker::Sized +}
+            deref_trace!{T; $this<T>; ?::core::marker::Sized +}
         )*
     }
 }

@@ -5,25 +5,42 @@ on: [push, pull_request, workflow_dispatch]
 env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
-  build-on-stable:
+  on-stable:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build
+        with:
+          components: clippy
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Check and Clippy
+        # Keep "std" feature always enabled on stable to avoid needing the no-std related nightly features
         run: |
-          cargo build --no-default-features --verbose --workspace
-          cargo build --verbose --workspace
-          cargo build -F full --verbose --workspace
-  build-on-nightly:
+          cargo hack check --all-targets --feature-powerset --ignore-unknown-features --workspace --skip nightly --clean-per-run --verbose -F std
+          cargo hack check --all-targets --feature-powerset --ignore-unknown-features --workspace --skip nightly --clean-per-run --verbose -F std --release
+          cargo hack clippy --all-targets --feature-powerset --ignore-unknown-features --workspace --skip nightly --clean-per-run --verbose -F std -- -D warnings
+  on-nightly:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
-      - name: Build
+        with:
+          components: clippy
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Check and Clippy (nightly)
         run: |
-          cargo build --no-default-features -F nightly --verbose --workspace
-          cargo build -F nightly --verbose --workspace
-          cargo build -F full,nightly --verbose --workspace
+          cargo hack check --all-targets --feature-powerset --ignore-unknown-features --workspace --clean-per-run --verbose -F nightly
+          cargo hack clippy --all-targets --feature-powerset --ignore-unknown-features --workspace --clean-per-run --verbose -F nightly
+        # cargo hack clippy --all-targets --feature-powerset --ignore-unknown-features --workspace --clean-per-run --verbose -F nightly -- -D warnings
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Build docs
+        run: cargo doc --no-deps --all-features --verbose

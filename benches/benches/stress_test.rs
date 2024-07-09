@@ -1,7 +1,6 @@
 //! Benchmark adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
 use std::cell::RefCell;
-use std::hint::black_box;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
@@ -10,24 +9,18 @@ use rust_cc::*;
 
 // BENCHMARK 1: My janky stress test
 // (It basically creates a graph where every node is rooted, then de-roots some nodes a few at a time)
+#[derive(Trace, Finalize)]
 struct DirectedGraphNode {
     _label: String,
     edges: Vec<Cc<RefCell<DirectedGraphNode>>>,
 }
 
-unsafe impl Trace for DirectedGraphNode {
-    fn trace(&self, ctx: &mut Context<'_>) {
-        self.edges.iter().for_each(|elem| elem.trace(ctx));
-    }
-}
-
-impl Finalize for DirectedGraphNode {}
-
 const NODE_COUNT: usize = 1 << 15;
 const EDGE_COUNT: usize = 1 << 15;
 const SHRINK_DIV: usize = 1 << 10;
 
-fn stress_test(rng: &mut StdRng) -> Vec<usize> {
+pub fn stress_test(seed: u64) -> Vec<usize> {
+    let rng = &mut StdRng::seed_from_u64(seed);
     let mut res = Vec::new();
     {
         let mut nodes = Vec::new();
@@ -56,8 +49,4 @@ fn stress_test(rng: &mut StdRng) -> Vec<usize> {
     }
     collect_cycles();
     res
-}
-
-pub fn benchmark_stress_test() {
-    stress_test(black_box(&mut StdRng::seed_from_u64(0xCAFE)));
 }
