@@ -63,11 +63,6 @@ impl Finalize for Data {
 }
 ```
 
-> [!NOTE]  
-> Finalization adds an overhead to each collection execution. Cleaners provide a faster alternative to finalization.
->
-> *When possible*, it's suggested to prefer cleaners and disable finalization.
-
 For more information read [the docs](https://docs.rs/rust-cc/latest/rust_cc/).
 
 ## The collection algorithm
