@@ -37,7 +37,7 @@ new_key_type! {
 }
 
 struct CleanerMap {
-    map: RefCell<Option<SlotMap<CleanerKey, CleanerFn>>>, // The Option is used to avoid allocating until a cleaning action is registered
+    map: RefCell<Option<SlotMap<CleanerKey, CleaningAction>>>, // The Option is used to avoid allocating until a cleaning action is registered
 }
 
 unsafe impl Trace for CleanerMap {
@@ -48,9 +48,9 @@ unsafe impl Trace for CleanerMap {
 
 impl Finalize for CleanerMap {}
 
-struct CleanerFn(Option<Box<dyn FnOnce() + 'static>>);
+struct CleaningAction(Option<Box<dyn FnOnce() + 'static>>);
 
-impl Drop for CleanerFn {
+impl Drop for CleaningAction {
     fn drop(&mut self) {
         if let Some(fun) = self.0.take() {
             fun();
@@ -91,7 +91,7 @@ impl Cleaner {
             .map
             .borrow_mut()
             .get_or_insert_with(|| SlotMap::with_capacity_and_key(3))
-            .insert(CleanerFn(Some(Box::new(action))));
+            .insert(CleaningAction(Some(Box::new(action))));
 
         Cleanable {
             cleaner_map: self.cleaner_map.downgrade(),
