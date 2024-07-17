@@ -29,8 +29,8 @@ use core::cell::RefCell;
 
 use slotmap::{new_key_type, SlotMap};
 
-use crate::{Context, Finalize, Trace};
-use crate::weak::{Weak, WeakableCc};
+use crate::{Cc, Context, Finalize, Trace};
+use crate::weak::Weak;
 
 new_key_type! {
     struct CleanerKey;
@@ -62,7 +62,7 @@ impl Drop for CleanerFn {
 ///
 /// All the cleaning actions registered in a `Cleaner` are run when it is dropped, unless they have been manually executed before.
 pub struct Cleaner {
-    cleaner_map: WeakableCc<CleanerMap>,
+    cleaner_map: Cc<CleanerMap>,
 }
 
 impl Cleaner {
@@ -71,7 +71,7 @@ impl Cleaner {
     #[inline]
     pub fn new() -> Cleaner {
         Cleaner {
-            cleaner_map: WeakableCc::new_weakable(CleanerMap {
+            cleaner_map: Cc::new(CleanerMap {
                 map: RefCell::new(None),
             }),
         }

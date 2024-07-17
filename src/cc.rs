@@ -11,6 +11,7 @@ use core::{
     ops::CoerceUnsized,
     ptr::{metadata, DynMetadata},
 };
+use core::cell::Cell;
 
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
@@ -18,6 +19,8 @@ use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
+#[cfg(feature = "weak-ptr")]
+use crate::weak::weak_metadata::WeakMetadata;
 
 /// A thread-local cycle collected pointer.
 ///
@@ -255,7 +258,8 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
         // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
         // In this case, no further action has to be taken, except decrementing the reference counter.
-        if self.counter_marker().is_traced() {
+        // Skip the rest of the code also when the value has already been dropped
+        if self.counter_marker().is_traced_or_dropped() {
             decrement_counter(self);
             return;
         }
@@ -287,11 +291,13 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 let _dropping_guard = replace_state_field!(dropping, true, state);
                 let layout = self.inner().layout();
 
-                // Set the object as dropped before dropping and deallocating it
-                // This feature is used only in weak pointers, so do this only if they're enabled
                 #[cfg(feature = "weak-ptr")]
                 {
-                    self.counter_marker().set_dropped(true);
+                    // Set the object as dropped before dropping and deallocating it
+                    // This feature is used only in weak pointers, so do this only if they're enabled
+                    self.counter_marker().mark(Mark::Dropped);
+
+                    self.inner().drop_metadata();
                 }
 
                 // SAFETY: we're the only one to have a pointer to this allocation
@@ -331,11 +337,7 @@ pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
     next: UnsafeCell<Option<NonNull<CcBox<()>>>>,
     prev: UnsafeCell<Option<NonNull<CcBox<()>>>>,
 
-    #[cfg(feature = "nightly")]
-    vtable: DynMetadata<dyn InternalTrace>,
-
-    #[cfg(not(feature = "nightly"))]
-    fat_ptr: NonNull<dyn InternalTrace>,
+    metadata: Cell<Metadata>,
 
     counter_marker: CounterMarker,
     _phantom: PhantomData<Rc<()>>, // Make CcBox !Send and !Sync
@@ -363,10 +365,7 @@ impl<T: Trace + 'static> CcBox<T> {
                 CcBox {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
-                    #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
-                    #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
+                    metadata: Metadata::new(ptr),
                     counter_marker: CounterMarker::new_with_counter_to_one(already_finalized),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
@@ -404,12 +403,72 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
     pub(crate) fn layout(&self) -> Layout {
         #[cfg(feature = "nightly")]
         {
-            self.vtable.layout()
+            self.vtable().vtable.layout()
         }
 
         #[cfg(not(feature = "nightly"))]
         unsafe {
-            Layout::for_value(self.fat_ptr.as_ref())
+            Layout::for_value(self.vtable().fat_ptr.as_ref())
+        }
+    }
+
+    #[inline]
+    fn vtable(&self) -> VTable {
+        #[cfg(feature = "weak-ptr")]
+        unsafe {
+            if self.counter_marker.has_allocated_for_metadata() {
+                self.metadata.get().boxed_metadata.as_ref().vtable
+            } else {
+                self.metadata.get().vtable
+            }
+        }
+
+        #[cfg(not(feature = "weak-ptr"))]
+        unsafe {
+            self.metadata.get().vtable
+        }
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline]
+    pub(crate) fn get_or_init_metadata(&self) -> NonNull<BoxedMetadata> {
+        unsafe {
+            if self.counter_marker.has_allocated_for_metadata() {
+                self.metadata.get().boxed_metadata
+            } else {
+                let vtable = self.metadata.get().vtable;
+                let ptr = BoxedMetadata::new(vtable, WeakMetadata::new(true));
+                self.metadata.set(Metadata {
+                    boxed_metadata: ptr,
+                });
+                self.counter_marker.set_allocated_for_metadata(true);
+                ptr
+            }
+        }
+    }
+
+    /// # Safety
+    /// The metadata must have been allocated.
+    #[cfg(feature = "weak-ptr")]
+    #[inline(always)]
+    pub(crate) unsafe fn get_metadata_unchecked(&self) -> NonNull<BoxedMetadata> {
+        self.metadata.get().boxed_metadata
+    }
+
+    #[cfg(feature = "weak-ptr")]
+    #[inline]
+    pub(crate) fn drop_metadata(&self) {
+        if self.counter_marker.has_allocated_for_metadata() {
+            unsafe {
+                let boxed = self.get_metadata_unchecked();
+                if boxed.as_ref().weak_metadata.counter() == 0 {
+                    // There are no weak pointers, deallocate the metadata
+                    dealloc_other(boxed);
+                } else {
+                    // There exist weak pointers, set the CcBox allocation not accessible
+                    boxed.as_ref().weak_metadata.set_accessible(false);
+                }
+            }
         }
     }
 
@@ -528,6 +587,13 @@ impl CcBox<()> {
     /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
+        #[cfg(feature = "weak-ptr")]
+        {
+            // Set the object as dropped before dropping it
+            // This feature is used only in weak pointers, so do this only if they're enabled
+            ptr.as_ref().counter_marker().mark(Mark::Dropped);
+        }
+
         CcBox::get_traceable(ptr).as_mut().drop_elem();
     }
 
@@ -535,13 +601,13 @@ impl CcBox<()> {
     fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
         #[cfg(feature = "nightly")]
         unsafe {
-            let vtable = ptr.as_ref().vtable;
+            let vtable = ptr.as_ref().vtable().vtable;
             NonNull::from_raw_parts(ptr.cast(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
         unsafe {
-            ptr.as_ref().fat_ptr
+            ptr.as_ref().vtable().fat_ptr
         }
     }
 
@@ -656,6 +722,67 @@ impl CcBox<()> {
                     false
                 }
             },
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+union Metadata {
+    vtable: VTable,
+    #[cfg(feature = "weak-ptr")]
+    boxed_metadata: NonNull<BoxedMetadata>,
+}
+
+impl Metadata {
+    #[inline]
+    fn new<T: Trace + 'static>(cc_box: NonNull<CcBox<T>>) -> Cell<Metadata> {
+        #[cfg(feature = "nightly")]
+        let vtable = VTable {
+            vtable: metadata(cc_box.as_ptr() as *mut dyn InternalTrace),
+        };
+
+        #[cfg(not(feature = "nightly"))]
+        let vtable = VTable {
+            fat_ptr: unsafe { // SAFETY: the ptr comes from a NotNull ptr
+                NonNull::new_unchecked(cc_box.as_ptr() as *mut dyn InternalTrace)
+            },
+        };
+
+        Cell::new(Metadata {
+            vtable
+        })
+    }
+}
+
+#[derive(Copy, Clone)]
+struct VTable {
+    #[cfg(feature = "nightly")]
+    vtable: DynMetadata<dyn InternalTrace>,
+
+    #[cfg(not(feature = "nightly"))]
+    fat_ptr: NonNull<dyn InternalTrace>,
+}
+
+#[cfg(feature = "weak-ptr")]
+pub(crate) struct BoxedMetadata {
+    vtable: VTable,
+    pub(crate) weak_metadata: WeakMetadata,
+}
+
+#[cfg(feature = "weak-ptr")]
+impl BoxedMetadata {
+    #[inline]
+    fn new(vtable: VTable, metadata: WeakMetadata) -> NonNull<BoxedMetadata> {
+        unsafe {
+            let ptr: NonNull<BoxedMetadata> = alloc_other();
+            ptr::write(
+                ptr.as_ptr(),
+                BoxedMetadata {
+                    vtable,
+                    weak_metadata: metadata,
+                },
+            );
+            ptr
         }
     }
 }
