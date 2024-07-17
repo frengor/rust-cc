@@ -18,9 +18,9 @@ use crate::cc::{BoxedMetadata, CcBox};
 use crate::state::try_state;
 use crate::{Cc, Context, Finalize, Trace};
 use crate::utils::{cc_dealloc, dealloc_other};
-use crate::weak::weak_metadata::WeakMetadata;
+use crate::weak::weak_counter_marker::WeakCounterMarker;
 
-pub(crate) mod weak_metadata;
+pub(crate) mod weak_counter_marker;
 
 /// A non-owning pointer to the managed allocation.
 pub struct Weak<T: ?Sized + Trace + 'static> {
@@ -77,7 +77,7 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
     /// Returns the number of [`Cc`]s to the pointed allocation.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        if self.metadata().is_accessible() {
+        if self.weak_counter_marker().is_accessible() {
             // SAFETY: self.cc is still allocated and can be dereferenced
             let counter_marker = unsafe { self.cc.as_ref() }.counter_marker();
 
@@ -107,12 +107,12 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
     #[inline]
     pub fn weak_count(&self) -> u32 {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
-        self.metadata().counter() as u32
+        self.weak_counter_marker().counter() as u32
     }
 
     #[inline(always)]
-    fn metadata(&self) -> &WeakMetadata {
-        unsafe { &self.metadata.as_ref().weak_metadata }
+    fn weak_counter_marker(&self) -> &WeakCounterMarker {
+        unsafe { &self.metadata.as_ref().weak_counter_marker }
     }
 }
 
@@ -132,7 +132,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
             panic!("Cannot clone while tracing!");
         }
 
-        if self.metadata().increment_counter().is_err() {
+        if self.weak_counter_marker().increment_counter().is_err() {
             panic!("Too many references has been created to a single Weak");
         }
 
@@ -148,10 +148,10 @@ impl<T: ?Sized + Trace + 'static> Drop for Weak<T> {
     #[inline]
     fn drop(&mut self) {
         // Always decrement the weak counter
-        let res = self.metadata().decrement_counter();
+        let res = self.weak_counter_marker().decrement_counter();
         debug_assert!(res.is_ok());
 
-        if self.metadata().counter() == 0 && !self.metadata().is_accessible() {
+        if self.weak_counter_marker().counter() == 0 && !self.weak_counter_marker().is_accessible() {
             // No weak pointer is left and the CcBox has been deallocated, so just deallocate the metadata
             unsafe {
                 dealloc_other(self.metadata);
@@ -231,7 +231,7 @@ let cyclic = Cc::new_cyclic(|weak| {
 
         // Set weak counter to 1
         // This is done after creating the Cc to make sure that if Cc::new panics the metadata allocation isn't leaked
-        let _ = unsafe { metadata.as_ref() }.weak_metadata.increment_counter();
+        let _ = unsafe { metadata.as_ref() }.weak_counter_marker.increment_counter();
 
         {
             let counter_marker = unsafe { invalid_cc.as_ref() }.counter_marker();
@@ -310,7 +310,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
 
         let metadata = self.inner().get_or_init_metadata();
 
-        if unsafe { metadata.as_ref() }.weak_metadata.increment_counter().is_err() {
+        if unsafe { metadata.as_ref() }.weak_counter_marker.increment_counter().is_err() {
             panic!("Too many references has been created to a single Weak");
         }
 
@@ -329,7 +329,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
         if self.inner().counter_marker().has_allocated_for_metadata() {
             // SAFETY: The metadata has been allocated
-            unsafe { self.inner().get_metadata_unchecked().as_ref() }.weak_metadata.counter() as u32
+            unsafe { self.inner().get_metadata_unchecked().as_ref() }.weak_counter_marker.counter() as u32
         } else {
             0
         }

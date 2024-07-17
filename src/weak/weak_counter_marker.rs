@@ -19,17 +19,17 @@ pub(crate) const MAX: u16 = !ACCESSIBLE_MASK; // First 15 bits to 1
 /// * `A` is `1` when the `Cc` is accessible, `0` otherwise
 /// * `B` is the weak counter
 #[derive(Clone, Debug)]
-pub(crate) struct WeakMetadata {
+pub(crate) struct WeakCounterMarker {
     weak_counter: Cell<u16>,
 }
 
 pub(crate) struct OverflowError;
 
-impl WeakMetadata {
+impl WeakCounterMarker {
     #[inline]
     #[must_use]
-    pub(crate) fn new(accessible: bool) -> WeakMetadata {
-        WeakMetadata {
+    pub(crate) fn new(accessible: bool) -> WeakCounterMarker {
+        WeakCounterMarker {
             weak_counter: Cell::new(if accessible {
                 INITIAL_VALUE_ACCESSIBLE
             } else {

@@ -20,7 +20,7 @@ use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptr")]
-use crate::weak::weak_metadata::WeakMetadata;
+use crate::weak::weak_counter_marker::WeakCounterMarker;
 
 /// A thread-local cycle collected pointer.
 ///
@@ -437,7 +437,7 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
                 self.metadata.get().boxed_metadata
             } else {
                 let vtable = self.metadata.get().vtable;
-                let ptr = BoxedMetadata::new(vtable, WeakMetadata::new(true));
+                let ptr = BoxedMetadata::new(vtable, WeakCounterMarker::new(true));
                 self.metadata.set(Metadata {
                     boxed_metadata: ptr,
                 });
@@ -461,12 +461,12 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
         if self.counter_marker.has_allocated_for_metadata() {
             unsafe {
                 let boxed = self.get_metadata_unchecked();
-                if boxed.as_ref().weak_metadata.counter() == 0 {
+                if boxed.as_ref().weak_counter_marker.counter() == 0 {
                     // There are no weak pointers, deallocate the metadata
                     dealloc_other(boxed);
                 } else {
                     // There exist weak pointers, set the CcBox allocation not accessible
-                    boxed.as_ref().weak_metadata.set_accessible(false);
+                    boxed.as_ref().weak_counter_marker.set_accessible(false);
                 }
             }
         }
@@ -766,20 +766,20 @@ struct VTable {
 #[cfg(feature = "weak-ptr")]
 pub(crate) struct BoxedMetadata {
     vtable: VTable,
-    pub(crate) weak_metadata: WeakMetadata,
+    pub(crate) weak_counter_marker: WeakCounterMarker,
 }
 
 #[cfg(feature = "weak-ptr")]
 impl BoxedMetadata {
     #[inline]
-    fn new(vtable: VTable, metadata: WeakMetadata) -> NonNull<BoxedMetadata> {
+    fn new(vtable: VTable, weak_counter_marker: WeakCounterMarker) -> NonNull<BoxedMetadata> {
         unsafe {
             let ptr: NonNull<BoxedMetadata> = alloc_other();
             ptr::write(
                 ptr.as_ptr(),
                 BoxedMetadata {
                     vtable,
-                    weak_metadata: metadata,
+                    weak_counter_marker,
                 },
             );
             ptr
