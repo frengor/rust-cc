@@ -210,19 +210,17 @@ pub fn collect_cycles() {
 
 #[cfg(feature = "auto-collect")]
 #[inline(never)]
-pub(crate) fn trigger_collection() {
-    let _ = try_state(|state| {
-        if state.is_collecting() {
-            return;
+pub(crate) fn trigger_collection(state: &State) {
+    if state.is_collecting() {
+        return;
+    }
+
+    let _ = POSSIBLE_CYCLES.try_with(|pc| {
+        if config::config(|config| config.should_collect(state, pc)).unwrap_or(false) {
+            collect(state, pc);
+
+            adjust_trigger_point(state);
         }
-
-        let _ = POSSIBLE_CYCLES.try_with(|pc| {
-            if config::config(|config| config.should_collect(state, pc)).unwrap_or(false) {
-                collect(state, pc);
-
-                adjust_trigger_point(state);
-            }
-        });
     });
 }
 

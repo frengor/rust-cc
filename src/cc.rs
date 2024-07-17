@@ -62,7 +62,7 @@ impl<T: Trace + 'static> Cc<T> {
             }
 
             #[cfg(feature = "auto-collect")]
-            super::trigger_collection();
+            super::trigger_collection(state);
 
             Cc {
                 inner: CcBox::new(t, state),
