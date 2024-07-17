@@ -374,3 +374,41 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
     }
     assert!(DROPPED.with(|dropped| dropped.get()));
 }
+
+#[test]
+fn weak_new() {
+    reset_state();
+    
+    let new: Weak<u32> = Weak::new();
+
+    assert_eq!(0, new.weak_count());
+    assert_eq!(0, new.strong_count());
+    assert!(new.upgrade().is_none());
+
+    let other = new.clone();
+
+    assert_eq!(0, other.weak_count());
+    assert_eq!(0, other.strong_count());
+    assert!(other.upgrade().is_none());
+}
+
+#[test]
+fn weak_new_ptr_eq() {
+    reset_state();
+    
+    let new: Weak<u32> = Weak::new();
+    let other_new: Weak<u32> = Weak::new();
+    
+    let cc = Cc::new(5u32);
+    let other_cc = Cc::new(6u32);
+
+    assert_eq!(0, new.weak_count());
+    assert_eq!(0, new.strong_count());
+
+    assert!(Weak::ptr_eq(&new, &new));
+    assert!(Weak::ptr_eq(&new, &other_new));
+    assert!(Weak::ptr_eq(&new, &new.clone()));
+    assert!(!Weak::ptr_eq(&new, &cc.downgrade()));
+    assert!(Weak::ptr_eq(&cc.downgrade(), &cc.downgrade()));
+    assert!(!Weak::ptr_eq(&cc.downgrade(), &other_cc.downgrade()));
+}

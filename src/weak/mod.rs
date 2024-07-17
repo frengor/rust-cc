@@ -24,7 +24,7 @@ pub(crate) mod weak_counter_marker;
 
 /// A non-owning pointer to the managed allocation.
 pub struct Weak<T: ?Sized + Trace + 'static> {
-    metadata: NonNull<BoxedMetadata>,
+    metadata: Option<NonNull<BoxedMetadata>>, // None when created using Weak::new()
     cc: NonNull<CcBox<T>>,
     _phantom: PhantomData<Rc<T>>, // Make Weak !Send and !Sync
 }
@@ -35,6 +35,18 @@ impl<T, U> CoerceUnsized<Weak<U>> for Weak<T>
     T: ?Sized + Trace + Unsize<U> + 'static,
     U: ?Sized + Trace + 'static,
 {
+}
+
+impl<T: Trace + 'static> Weak<T> {
+    /// Constructs a new [`Weak<T>`][`Weak`], without allocating any memory. Calling [`upgrade`][`method@Weak::upgrade`] on the returned value always gives [`None`].
+    #[inline]
+    pub fn new() -> Self {
+        Weak {
+            metadata: None,
+            cc: NonNull::dangling(),
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<T: ?Sized + Trace + 'static> Weak<T> {
@@ -68,16 +80,25 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
         }
     }
 
-    /// Returns `true` if the two [`Weak`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
+    /// Returns `true` if the two [`Weak`]s point to the same allocation, or if both don’t point to any allocation
+    /// (because they were created with [`Weak::new()`][`Weak::new`]). This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Weak<T>, other: &Weak<T>) -> bool {
-        ptr::eq(this.metadata.as_ptr() as *const (), other.metadata.as_ptr() as *const ())
+        match (this.metadata, other.metadata) {
+            (None, None) => true,
+            (None, Some(_)) => false,
+            (Some(_), None) => false,
+            // Only compare the metadata allocations since they're surely unique
+            (Some(m1), Some(m2)) => ptr::eq(m1.as_ptr() as *const (), m2.as_ptr() as *const ()),
+        }
     }
 
     /// Returns the number of [`Cc`]s to the pointed allocation.
+    /// 
+    /// If `self` was created using [`Weak::new`], this will return 0.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        if self.weak_counter_marker().is_accessible() {
+        if self.weak_counter_marker().map_or(false, |wcm| wcm.is_accessible()) {
             // SAFETY: self.cc is still allocated and can be dereferenced
             let counter_marker = unsafe { self.cc.as_ref() }.counter_marker();
 
@@ -104,15 +125,17 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
     }
 
     /// Returns the number of [`Weak`]s to the pointed allocation.
+    /// 
+    /// If `self` was created using [`Weak::new`], this will return 0.
     #[inline]
     pub fn weak_count(&self) -> u32 {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
-        self.weak_counter_marker().counter() as u32
+        self.weak_counter_marker().map_or(0, |wcm| wcm.counter() as u32)
     }
 
     #[inline(always)]
-    fn weak_counter_marker(&self) -> &WeakCounterMarker {
-        unsafe { &self.metadata.as_ref().weak_counter_marker }
+    fn weak_counter_marker(&self) -> Option<&WeakCounterMarker> {
+        Some(unsafe { &self.metadata?.as_ref().weak_counter_marker })
     }
 }
 
@@ -132,8 +155,10 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
             panic!("Cannot clone while tracing!");
         }
 
-        if self.weak_counter_marker().increment_counter().is_err() {
-            panic!("Too many references has been created to a single Weak");
+        if let Some(wcm) = self.weak_counter_marker() {
+            if wcm.increment_counter().is_err() {
+                panic!("Too many references has been created to a single Weak");
+            }
         }
 
         Weak {
@@ -147,14 +172,16 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
 impl<T: ?Sized + Trace + 'static> Drop for Weak<T> {
     #[inline]
     fn drop(&mut self) {
-        // Always decrement the weak counter
-        let res = self.weak_counter_marker().decrement_counter();
-        debug_assert!(res.is_ok());
+        let Some(metadata) = self.metadata else { return; };
 
-        if self.weak_counter_marker().counter() == 0 && !self.weak_counter_marker().is_accessible() {
-            // No weak pointer is left and the CcBox has been deallocated, so just deallocate the metadata
-            unsafe {
-                dealloc_other(self.metadata);
+        unsafe {
+            // Always decrement the weak counter
+            let res = metadata.as_ref().weak_counter_marker.decrement_counter();
+            debug_assert!(res.is_ok());
+
+            if metadata.as_ref().weak_counter_marker.counter() == 0 && !metadata.as_ref().weak_counter_marker.is_accessible() {
+                // No weak pointer is left and the CcBox has been deallocated, so just deallocate the metadata
+                dealloc_other(metadata);
             }
         }
     }
@@ -168,6 +195,13 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Weak<T> {
 }
 
 impl<T: ?Sized + Trace + 'static> Finalize for Weak<T> {
+}
+
+impl<T: Trace + 'static> Default for Weak<T> {
+    #[inline]
+    fn default() -> Self {
+        Weak::new()
+    }
 }
 
 impl<T: Trace + 'static> Cc<T> {
@@ -244,7 +278,7 @@ let cyclic = Cc::new_cyclic(|weak| {
         }
 
         let weak: Weak<T> = Weak {
-            metadata,
+            metadata: Some(metadata),
             cc: invalid_cc.cast(), // This cast is correct since NewCyclicWrapper is repr(transparent) and contains a MaybeUninit<T>
             _phantom: PhantomData,
         };
@@ -317,7 +351,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         self.mark_alive();
 
         Weak {
-            metadata,
+            metadata: Some(metadata),
             cc: self.inner_ptr(),
             _phantom: PhantomData,
         }
