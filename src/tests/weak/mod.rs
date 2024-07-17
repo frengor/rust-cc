@@ -149,7 +149,8 @@ fn test_new_cyclic() {
 fn panicking_new_cyclic1() {
     reset_state();
 
-    let _cc = Cc::new_cyclic(|_| {
+    #[allow(clippy::unused_unit)] // Unit type needed to fix never type fallback error
+    let _cc = Cc::new_cyclic(|_| -> () {
         panic!("Expected panic during panicking_new_cyclic1!");
     });
 }
@@ -159,7 +160,8 @@ fn panicking_new_cyclic1() {
 fn panicking_new_cyclic2() {
     reset_state();
 
-    let _cc = Cc::new_cyclic(|weak| {
+    #[allow(clippy::unused_unit)] // Unit type needed to fix never type fallback error
+    let _cc = Cc::new_cyclic(|weak| -> () {
         let _weak = weak.clone();
         panic!("Expected panic during panicking_new_cyclic2!");
     });
