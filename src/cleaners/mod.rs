@@ -110,7 +110,7 @@ unsafe impl Trace for Cleaner {
     fn trace(&self, _: &mut Context<'_>) {
         // DO NOT TRACE self.cleaner_map, it would be unsound!
         // If self.cleaner_map would be traced here, it would be possible to have cleaning actions called
-        // with a reference to the cleaned object accessible from inside the clean function.
+        // with a reference to the cleaned object accessible from inside the cleaning action itself.
         // This would be unsound, since cleaning actions are called from the Drop implementation of Ccs (see the Trace trait safety section)
     }
 }

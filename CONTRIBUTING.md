@@ -41,7 +41,13 @@ Therefore, they undergo two tracing passes:
   Note that this second phase is correct only if the graph formed by the pointers is not changed between the two phases. Thus,
   this is a key requirement of the `Trace` trait and one of the reasons it is marked `unsafe`.
 
-# Writing documentation
+## Writing tests
+
+Every unit test should start with a call to `tests::reset_state()` to make sure errors in other tests don't impact the current one.
+
+Also, functions marked as `pub(crate)` and used only in unit tests should have the `for_tests` suffix, like `Cc::new_for_tests`.
+
+## Writing documentation
 
 Docs are always built with every feature enabled. This makes it easier to write and maintain the documentation.
 
