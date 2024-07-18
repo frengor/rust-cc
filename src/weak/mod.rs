@@ -37,7 +37,7 @@ impl<T, U> CoerceUnsized<Weak<U>> for Weak<T>
 {
 }
 
-impl<T: Trace + 'static> Weak<T> {
+impl<T: Trace> Weak<T> {
     /// Constructs a new [`Weak<T>`][`Weak`], without allocating any memory. Calling [`upgrade`][`method@Weak::upgrade`] on the returned value always gives [`None`].
     #[inline]
     pub fn new() -> Self {
@@ -49,7 +49,7 @@ impl<T: Trace + 'static> Weak<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Weak<T> {
+impl<T: ?Sized + Trace> Weak<T> {
     /// Tries to upgrade the weak pointer to a [`Cc`], returning [`None`] if the allocation has already been deallocated.
     /// 
     /// This creates a [`Cc`] pointer to the managed allocation, increasing the strong reference count.
@@ -139,7 +139,7 @@ impl<T: ?Sized + Trace + 'static> Weak<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
+impl<T: ?Sized + Trace> Clone for Weak<T> {
     /// Makes a clone of the [`Weak`] pointer.
     /// 
     /// This creates another [`Weak`] pointer to the same allocation, increasing the weak reference count.
@@ -169,7 +169,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Weak<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Drop for Weak<T> {
+impl<T: ?Sized + Trace> Drop for Weak<T> {
     #[inline]
     fn drop(&mut self) {
         let Some(metadata) = self.metadata else { return; };
@@ -187,24 +187,24 @@ impl<T: ?Sized + Trace + 'static> Drop for Weak<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for Weak<T> {
+unsafe impl<T: ?Sized + Trace> Trace for Weak<T> {
     #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {
         // Do not trace anything here, otherwise it wouldn't be a weak pointer
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for Weak<T> {
+impl<T: ?Sized + Trace> Finalize for Weak<T> {
 }
 
-impl<T: Trace + 'static> Default for Weak<T> {
+impl<T: Trace> Default for Weak<T> {
     #[inline]
     fn default() -> Self {
         Weak::new()
     }
 }
 
-impl<T: Trace + 'static> Cc<T> {
+impl<T: Trace> Cc<T> {
     /// Creates a new [`Cc<T>`][`Cc`] while providing a [`Weak<T>`][`Weak`] pointer to the allocation,
     /// to allow the creation of a `T` which holds a weak pointer to itself.
     /// 
@@ -288,7 +288,7 @@ let cyclic = Cc::new_cyclic(|weak| {
             invalid_cc: NonNull<CcBox<NewCyclicWrapper<T>>>,
         }
 
-        impl<T: Trace + 'static> Drop for PanicGuard<T> {
+        impl<T: Trace> Drop for PanicGuard<T> {
             fn drop(&mut self) {
                 unsafe {
                     // Deallocate only the metadata allocation
@@ -327,7 +327,7 @@ let cyclic = Cc::new_cyclic(|weak| {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Cc<T> {
+impl<T: ?Sized + Trace> Cc<T> {
     /// Creates a new [`Weak`] pointer to the managed allocation, increasing the weak reference count.
     /// 
     /// # Panics
@@ -376,7 +376,7 @@ struct NewCyclicWrapper<T: Trace + 'static> {
     inner: MaybeUninit<T>,
 }
 
-impl<T: Trace + 'static> NewCyclicWrapper<T> {
+impl<T: Trace> NewCyclicWrapper<T> {
     fn new() -> NewCyclicWrapper<T> {
         NewCyclicWrapper {
             inner: MaybeUninit::uninit(),
@@ -384,7 +384,7 @@ impl<T: Trace + 'static> NewCyclicWrapper<T> {
     }
 }
 
-unsafe impl<T: Trace + 'static> Trace for NewCyclicWrapper<T> {
+unsafe impl<T: Trace> Trace for NewCyclicWrapper<T> {
     fn trace(&self, ctx: &mut Context<'_>) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
@@ -393,7 +393,7 @@ unsafe impl<T: Trace + 'static> Trace for NewCyclicWrapper<T> {
     }
 }
 
-impl<T: Trace + 'static> Finalize for NewCyclicWrapper<T> {
+impl<T: Trace> Finalize for NewCyclicWrapper<T> {
     fn finalize(&self) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
@@ -402,7 +402,7 @@ impl<T: Trace + 'static> Finalize for NewCyclicWrapper<T> {
     }
 }
 
-impl<T: Trace + 'static> Drop for NewCyclicWrapper<T> {
+impl<T: Trace> Drop for NewCyclicWrapper<T> {
     fn drop(&mut self) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {

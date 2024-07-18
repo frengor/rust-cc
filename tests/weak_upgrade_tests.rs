@@ -14,7 +14,7 @@ struct Ignored<T: Trace + 'static> {
     should_panic: bool,
 }
 
-impl<T: Trace + 'static> Drop for Ignored<T> {
+impl<T: Trace> Drop for Ignored<T> {
     fn drop(&mut self) {
         // This is safe to implement
         assert!(self.weak.upgrade().is_none());

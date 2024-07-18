@@ -95,7 +95,7 @@ mod no_std_thread_locals {
         value: T,
     }
 
-    impl<T: 'static> NoStdLocalKey<T> {
+    impl<T> NoStdLocalKey<T> {
         #[inline(always)]
         pub(crate) const fn new(value: T) -> Self {
             NoStdLocalKey { value }

@@ -39,7 +39,7 @@ where
 {
 }
 
-impl<T: Trace + 'static> Cc<T> {
+impl<T: Trace> Cc<T> {
     /// Creates a new `Cc`.
     /// 
     /// # Collection
@@ -101,7 +101,7 @@ impl<T: Trace + 'static> Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Cc<T> {
+impl<T: ?Sized + Trace> Cc<T> {
     /// Returns `true` if the two [`Cc`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
@@ -185,7 +185,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
+impl<T: ?Sized + Trace> Clone for Cc<T> {
     /// Makes a clone of the [`Cc`] pointer.
     /// 
     /// This creates another pointer to the same allocation, increasing the strong reference count.
@@ -217,7 +217,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
+impl<T: ?Sized + Trace> Deref for Cc<T> {
     type Target = T;
 
     #[inline]
@@ -234,7 +234,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
+impl<T: ?Sized + Trace> Drop for Cc<T> {
     fn drop(&mut self) {
         #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
@@ -242,14 +242,14 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
         }
 
         #[inline]
-        fn decrement_counter<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+        fn decrement_counter<T: ?Sized + Trace>(cc: &Cc<T>) {
             // Always decrement the counter
             let res = cc.counter_marker().decrement_counter();
             debug_assert!(res.is_ok());
         }
 
         #[inline]
-        fn handle_possible_cycle<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+        fn handle_possible_cycle<T: ?Sized + Trace>(cc: &Cc<T>) {
             decrement_counter(cc);
 
             // We know that we're not part of either root_list or non_root_list, since the cc isn't traced
@@ -320,7 +320,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
+unsafe impl<T: ?Sized + Trace> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
@@ -330,7 +330,7 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
+impl<T: ?Sized + Trace> Finalize for Cc<T> {}
 
 #[repr(C)]
 pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
@@ -347,7 +347,7 @@ pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
     elem: UnsafeCell<T>,
 }
 
-impl<T: Trace + 'static> CcBox<T> {
+impl<T: Trace> CcBox<T> {
     #[inline(always)]
     #[must_use]
     fn new(t: T, state: &State) -> NonNull<CcBox<T>> {
@@ -383,7 +383,7 @@ impl<T: Trace + 'static> CcBox<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> CcBox<T> {
+impl<T: ?Sized + Trace> CcBox<T> {
     #[inline]
     pub(crate) fn get_elem(&self) -> &T {
         unsafe { &*self.elem.get() }
@@ -483,14 +483,14 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for CcBox<T> {
+unsafe impl<T: ?Sized + Trace> Trace for CcBox<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
         self.get_elem().trace(ctx);
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for CcBox<T> {
+impl<T: ?Sized + Trace> Finalize for CcBox<T> {
     #[inline(always)]
     fn finalize(&self) {
         self.get_elem().finalize();
@@ -735,7 +735,7 @@ union Metadata {
 
 impl Metadata {
     #[inline]
-    fn new<T: Trace + 'static>(cc_box: NonNull<CcBox<T>>) -> Cell<Metadata> {
+    fn new<T: Trace>(cc_box: NonNull<CcBox<T>>) -> Cell<Metadata> {
         #[cfg(feature = "nightly")]
         let vtable = VTable {
             vtable: metadata(cc_box.as_ptr() as *mut dyn InternalTrace),
@@ -797,7 +797,7 @@ trait InternalTrace: Trace {
     unsafe fn drop_elem(&self);
 }
 
-impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
+impl<T: ?Sized + Trace> InternalTrace for CcBox<T> {
     #[cfg(feature = "finalization")]
     fn finalize_elem(&self) {
         self.get_elem().finalize();
