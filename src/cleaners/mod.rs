@@ -26,7 +26,7 @@
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
-
+use core::fmt::{self, Debug, Formatter};
 use slotmap::{new_key_type, SlotMap};
 
 use crate::{Cc, Context, Finalize, Trace};
@@ -51,6 +51,7 @@ impl Finalize for CleanerMap {}
 struct CleaningAction(Option<Box<dyn FnOnce() + 'static>>);
 
 impl Drop for CleaningAction {
+    #[inline]
     fn drop(&mut self) {
         if let Some(fun) = self.0.take() {
             fun();
@@ -67,7 +68,6 @@ pub struct Cleaner {
 
 impl Cleaner {
     /// Creates a new [`Cleaner`].
-    #[allow(clippy::new_without_default)]
     #[inline]
     pub fn new() -> Cleaner {
         Cleaner {
@@ -117,6 +117,20 @@ unsafe impl Trace for Cleaner {
 
 impl Finalize for Cleaner {}
 
+impl Default for Cleaner {
+    #[inline]
+    fn default() -> Self {
+        Cleaner::new()
+    }
+}
+
+impl Debug for Cleaner {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cleaner").finish_non_exhaustive()
+    }
+}
+
 /// A `Cleanable` represents a cleaning action registered in a [`Cleaner`].
 pub struct Cleanable {
     cleaner_map: Weak<CleanerMap>,
@@ -147,3 +161,10 @@ unsafe impl Trace for Cleanable {
 }
 
 impl Finalize for Cleanable {}
+
+impl Debug for Cleanable {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cleanable").finish_non_exhaustive()
+    }
+}

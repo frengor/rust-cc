@@ -1,17 +1,22 @@
 use alloc::alloc::Layout;
+use alloc::rc::Rc;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, drop_in_place, NonNull};
-use alloc::rc::Rc;
+use core::borrow::Borrow;
+use core::cell::Cell;
+use core::fmt::{self, Debug, Display, Formatter, Pointer};
+use core::cmp::Ordering;
+use core::hash::{Hash, Hasher};
+use core::panic::{RefUnwindSafe, UnwindSafe};
 #[cfg(feature = "nightly")]
 use core::{
     marker::Unsize,
     ops::CoerceUnsized,
     ptr::{metadata, DynMetadata},
 };
-use core::cell::Cell;
 
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
@@ -807,3 +812,127 @@ impl<T: ?Sized + Trace> InternalTrace for CcBox<T> {
         drop_in_place(self.get_elem_mut());
     }
 }
+
+// ####################################
+// #          Cc Trait impls          #
+// ####################################
+
+impl<T: ?Sized + Trace + Default> Default for Cc<T> {
+    /// Creates a new [`Cc<T>`][`Cc`], with the [`Default`] value for `T`.
+    ///
+    /// # Collection
+    ///
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    ///
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    #[inline]
+    fn default() -> Self {
+        Cc::new(<T as Default>::default())
+    }
+}
+
+impl<T: ?Sized + Trace> AsRef<T> for Cc<T> {
+    #[inline(always)]
+    fn as_ref(&self) -> &T {
+        self
+    }
+}
+
+impl<T: ?Sized + Trace> Borrow<T> for Cc<T> {
+    #[inline(always)]
+    fn borrow(&self) -> &T {
+        self
+    }
+}
+
+impl<T: Trace> From<T> for Cc<T> {
+    /// Converts a generic `T` into a [`Cc<T>`][`Cc`].
+    ///
+    /// # Collection
+    ///
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    ///
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    #[inline(always)]
+    fn from(value: T) -> Self {
+        Cc::new(value)
+    }
+}
+
+// TODO impl From<Box<T>> for Cc<T>
+// TODO impl TryFrom<T> for Cc<T> when Cc::try_new will be implemented
+
+impl<T: ?Sized + Trace + Debug> Debug for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&**self, f)
+    }
+}
+
+impl<T: ?Sized + Trace + Display> Display for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&**self, f)
+    }
+}
+
+impl<T: ?Sized + Trace> Pointer for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Pointer::fmt(&ptr::addr_of!(**self), f)
+    }
+}
+
+impl<T: ?Sized + Trace + PartialEq> PartialEq for Cc<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: ?Sized + Trace + Eq> Eq for Cc<T> {}
+
+impl<T: ?Sized + Trace + Ord> Ord for Cc<T> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
+
+impl<T: ?Sized + Trace + PartialOrd> PartialOrd for Cc<T> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (**self).partial_cmp(&**other)
+    }
+
+    #[inline]
+    fn lt(&self, other: &Self) -> bool {
+        **self < **other
+    }
+
+    #[inline]
+    fn le(&self, other: &Self) -> bool {
+        **self <= **other
+    }
+
+    #[inline]
+    fn gt(&self, other: &Self) -> bool {
+        **self > **other
+    }
+
+    #[inline]
+    fn ge(&self, other: &Self) -> bool {
+        **self >= **other
+    }
+}
+
+impl<T: ?Sized + Trace + Hash> Hash for Cc<T> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (**self).hash(state);
+    }
+}
+
+impl<T: ?Sized + Trace + UnwindSafe> UnwindSafe for Cc<T> {}
+
+impl<T: ?Sized + Trace + RefUnwindSafe> RefUnwindSafe for Cc<T> {}

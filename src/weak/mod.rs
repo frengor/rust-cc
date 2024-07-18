@@ -12,8 +12,10 @@ use core::{
     marker::Unsize,
     ops::CoerceUnsized,
 };
+use core::fmt::{self, Debug, Formatter};
 use core::mem::MaybeUninit;
 use core::marker::PhantomData;
+
 use crate::cc::{BoxedMetadata, CcBox};
 use crate::state::try_state;
 use crate::{Cc, Context, Finalize, Trace};
@@ -197,13 +199,6 @@ unsafe impl<T: ?Sized + Trace> Trace for Weak<T> {
 impl<T: ?Sized + Trace> Finalize for Weak<T> {
 }
 
-impl<T: Trace> Default for Weak<T> {
-    #[inline]
-    fn default() -> Self {
-        Weak::new()
-    }
-}
-
 impl<T: Trace> Cc<T> {
     /// Creates a new [`Cc<T>`][`Cc`] while providing a [`Weak<T>`][`Weak`] pointer to the allocation,
     /// to allow the creation of a `T` which holds a weak pointer to itself.
@@ -377,6 +372,7 @@ struct NewCyclicWrapper<T: Trace + 'static> {
 }
 
 impl<T: Trace> NewCyclicWrapper<T> {
+    #[inline(always)]
     fn new() -> NewCyclicWrapper<T> {
         NewCyclicWrapper {
             inner: MaybeUninit::uninit(),
@@ -385,6 +381,7 @@ impl<T: Trace> NewCyclicWrapper<T> {
 }
 
 unsafe impl<T: Trace> Trace for NewCyclicWrapper<T> {
+    #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
@@ -394,6 +391,7 @@ unsafe impl<T: Trace> Trace for NewCyclicWrapper<T> {
 }
 
 impl<T: Trace> Finalize for NewCyclicWrapper<T> {
+    #[inline]
     fn finalize(&self) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
@@ -403,11 +401,30 @@ impl<T: Trace> Finalize for NewCyclicWrapper<T> {
 }
 
 impl<T: Trace> Drop for NewCyclicWrapper<T> {
+    #[inline]
     fn drop(&mut self) {
         // SAFETY: NewCyclicWrapper is used only in new_cyclic and a traceable Cc instance is not constructed until the contents are initialized
         unsafe {
             let ptr = self.inner.assume_init_mut() as *mut T;
             drop_in_place(ptr);
         }
+    }
+}
+
+// ####################################
+// #         Weak Trait impls         #
+// ####################################
+
+impl<T: Trace> Default for Weak<T> {
+    #[inline]
+    fn default() -> Self {
+        Weak::new()
+    }
+}
+
+impl<T: ?Sized + Trace + Debug> Debug for Weak<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "(Weak)")
     }
 }
