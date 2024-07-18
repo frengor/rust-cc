@@ -52,7 +52,7 @@ fn test_is_to_finalize() {
     assert!(counter.needs_finalization());
 }
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 #[test]
 fn test_weak_ptrs_exists() {
     let counter = CounterMarker::new_with_counter_to_one(false);

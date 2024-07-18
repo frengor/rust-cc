@@ -37,10 +37,10 @@ auto-collect = []
 finalization = []
 
 # Enables weak pointers
-weak-ptr = []
+weak-ptrs = []
 
 # Enables cleaners
-cleaners = ["dep:slotmap", "weak-ptr"]
+cleaners = ["dep:slotmap", "weak-ptrs"]
 
 # Enables support for stdlib, disable for no-std support (requires ELF TLS and nightly)
 std = ["slotmap?/std", "thiserror/std"]

@@ -24,7 +24,7 @@ use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 use crate::weak::weak_counter_marker::WeakCounterMarker;
 
 /// A thread-local cycle collected pointer.
@@ -173,13 +173,13 @@ impl<T: ?Sized + Trace> Cc<T> {
         unsafe { self.inner.as_ref() }
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline(always)]
     pub(crate) fn inner_ptr(&self) -> NonNull<CcBox<T>> {
         self.inner
     }
 
-    #[cfg(feature = "weak-ptr")] // Currently used only here
+    #[cfg(feature = "weak-ptrs")] // Currently used only here
     #[inline(always)]
     #[must_use]
     pub(crate) fn __new_internal(inner: NonNull<CcBox<T>>) -> Cc<T> {
@@ -296,7 +296,7 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
                 let _dropping_guard = replace_state_field!(dropping, true, state);
                 let layout = self.inner().layout();
 
-                #[cfg(feature = "weak-ptr")]
+                #[cfg(feature = "weak-ptrs")]
                 {
                     // Set the object as dropped before dropping and deallocating it
                     // This feature is used only in weak pointers, so do this only if they're enabled
@@ -419,7 +419,7 @@ impl<T: ?Sized + Trace> CcBox<T> {
 
     #[inline]
     fn vtable(&self) -> VTable {
-        #[cfg(feature = "weak-ptr")]
+        #[cfg(feature = "weak-ptrs")]
         unsafe {
             if self.counter_marker.has_allocated_for_metadata() {
                 self.metadata.get().boxed_metadata.as_ref().vtable
@@ -428,13 +428,13 @@ impl<T: ?Sized + Trace> CcBox<T> {
             }
         }
 
-        #[cfg(not(feature = "weak-ptr"))]
+        #[cfg(not(feature = "weak-ptrs"))]
         unsafe {
             self.metadata.get().vtable
         }
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline]
     pub(crate) fn get_or_init_metadata(&self) -> NonNull<BoxedMetadata> {
         unsafe {
@@ -454,13 +454,13 @@ impl<T: ?Sized + Trace> CcBox<T> {
 
     /// # Safety
     /// The metadata must have been allocated.
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline(always)]
     pub(crate) unsafe fn get_metadata_unchecked(&self) -> NonNull<BoxedMetadata> {
         self.metadata.get().boxed_metadata
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline]
     pub(crate) fn drop_metadata(&self) {
         if self.counter_marker.has_allocated_for_metadata() {
@@ -592,7 +592,7 @@ impl CcBox<()> {
     /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
-        #[cfg(feature = "weak-ptr")]
+        #[cfg(feature = "weak-ptrs")]
         {
             // Set the object as dropped before dropping it
             // This feature is used only in weak pointers, so do this only if they're enabled
@@ -734,7 +734,7 @@ impl CcBox<()> {
 #[derive(Copy, Clone)]
 union Metadata {
     vtable: VTable,
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     boxed_metadata: NonNull<BoxedMetadata>,
 }
 
@@ -768,13 +768,13 @@ struct VTable {
     fat_ptr: NonNull<dyn InternalTrace>,
 }
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 pub(crate) struct BoxedMetadata {
     vtable: VTable,
     pub(crate) weak_counter_marker: WeakCounterMarker,
 }
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 impl BoxedMetadata {
     #[inline]
     fn new(vtable: VTable, weak_counter_marker: WeakCounterMarker) -> NonNull<BoxedMetadata> {

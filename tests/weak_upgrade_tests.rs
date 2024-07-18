@@ -1,5 +1,5 @@
 #![cfg(not(miri))] // This test leaks memory, so it can't be run by Miri
-#![cfg(all(feature = "weak-ptr", feature = "derive"))]
+#![cfg(all(feature = "weak-ptrs", feature = "derive"))]
 //! This module tests that `Weak::upgrade` returns None when called in destructors while collecting.
 
 use std::cell::RefCell;

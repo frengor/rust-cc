@@ -136,19 +136,19 @@ impl CounterMarker {
         self.set_bit(finalized, FINALIZED_MASK);
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline]
     pub(crate) fn has_allocated_for_metadata(&self) -> bool {
         (self.counter.get() & METADATA_MASK) == METADATA_MASK
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline]
     pub(crate) fn set_allocated_for_metadata(&self, allocated_for_metadata: bool) {
         self.set_bit(allocated_for_metadata, METADATA_MASK);
     }
 
-    #[cfg(any(feature = "weak-ptr", feature = "finalization"))]
+    #[cfg(any(feature = "weak-ptrs", feature = "finalization"))]
     #[inline(always)]
     fn set_bit(&self, value: bool, mask: u32) {
         if value {
@@ -177,7 +177,7 @@ impl CounterMarker {
         (self.counter.get() & FIRST_BIT_MASK) == FIRST_BIT_MASK
     }
 
-    #[cfg(any(feature = "weak-ptr", all(test, feature = "std")))]
+    #[cfg(any(feature = "weak-ptrs", all(test, feature = "std")))]
     #[inline]
     pub(crate) fn is_dropped(&self) -> bool {
         (self.counter.get() & BITS_MASK) == DROPPED

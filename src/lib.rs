@@ -64,11 +64,11 @@ collect_cycles();
 //! ### Weak pointers
 //!
 #![cfg_attr(
-    feature = "weak-ptr",
+    feature = "weak-ptrs",
     doc = r"```rust"
 )]
 #![cfg_attr(
-    not(feature = "weak-ptr"),
+    not(feature = "weak-ptrs"),
     doc = r"```rust,ignore"
 )]
 #![doc = r"# use rust_cc::*;
@@ -174,7 +174,7 @@ pub mod config;
 #[cfg(feature = "derive")]
 mod derives;
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 pub mod weak;
 
 #[cfg(feature = "cleaners")]
@@ -395,14 +395,14 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
         fn drop(&mut self) {
             // Remove the elements from the list, setting them as dropped
             // This feature is used only in weak pointers, so do this only if they're enabled
-            #[cfg(feature = "weak-ptr")]
+            #[cfg(feature = "weak-ptrs")]
             while let Some(ptr) = self.list.remove_first() {
                 // Always set the mark, since it has been cleared by remove_first
                 unsafe { ptr.as_ref() }.counter_marker().mark(Mark::Dropped);
             }
 
             // If not using weak pointers, just call the list's drop implementation
-            #[cfg(not(feature = "weak-ptr"))]
+            #[cfg(not(feature = "weak-ptrs"))]
             unsafe {
                 ManuallyDrop::drop(&mut self.list);
             }
@@ -422,7 +422,7 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
         unsafe {
             debug_assert!(ptr.as_ref().counter_marker().is_traced());
 
-            #[cfg(feature = "weak-ptr")]
+            #[cfg(feature = "weak-ptrs")]
             ptr.as_ref().drop_metadata();
 
             CcBox::drop_inner(ptr.cast());

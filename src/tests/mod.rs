@@ -15,7 +15,7 @@ mod list;
 mod panicking;
 mod counter_marker;
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 mod weak;
 
 #[cfg(feature = "cleaners")]
