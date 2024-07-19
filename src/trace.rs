@@ -310,7 +310,7 @@ deref_traces_sized! {
 unsafe impl<T: ?Sized + Trace> Trace for RefCell<T> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if let Ok(borrow) = self.try_borrow() {
+        if let Ok(borrow) = self.try_borrow_mut() {
             borrow.trace(ctx);
         }
     }
