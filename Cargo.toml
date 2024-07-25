@@ -64,6 +64,9 @@ name = "bench"
 harness = false
 required-features = ["std", "derive"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_auto_cfg)'] }
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "doc_auto_cfg", "--generate-link-to-definition"]
