@@ -21,7 +21,7 @@ use core::{
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
-use crate::list::ListMethods;
+use crate::lists::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptrs")]

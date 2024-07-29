@@ -26,7 +26,7 @@ use core::num::NonZeroUsize;
 use core::marker::PhantomData;
 
 use thiserror::Error;
-use crate::list::CountedList;
+use crate::lists::CountedList;
 
 use crate::state::State;
 use crate::utils;

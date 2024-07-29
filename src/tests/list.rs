@@ -4,7 +4,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::NonNull;
 
 use crate::{CcBox, Mark};
-use crate::list::*;
+use crate::lists::*;
 use crate::counter_marker::CounterMarker;
 
 use test_case::{test_case, test_matrix};

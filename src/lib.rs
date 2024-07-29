@@ -152,7 +152,7 @@ use core::ops::{Deref, DerefMut};
 
 use crate::cc::CcBox;
 use crate::counter_marker::Mark;
-use crate::list::*;
+use crate::lists::*;
 use crate::state::{replace_state_field, State, try_state};
 use crate::trace::ContextInner;
 use crate::utils::*;
@@ -162,7 +162,7 @@ mod tests;
 
 mod cc;
 mod counter_marker;
-mod list;
+mod lists;
 pub mod state;
 mod trace;
 mod utils;

@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 
 use crate::trace::Trace;
-use crate::list::*;
+use crate::lists::*;
 use crate::{state, Cc, Context, Finalize, POSSIBLE_CYCLES};
 use crate::state::state;
 
