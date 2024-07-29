@@ -118,16 +118,16 @@ fn test_buffered_threshold_auto_collect() {
         _t: T,
     }
 
-    unsafe impl<T: 'static> Trace for Cyclic<T> {
+    unsafe impl<T> Trace for Cyclic<T> {
         fn trace(&self, ctx: &mut Context<'_>) {
             self.cyclic.trace(ctx);
         }
     }
 
-    impl<T: 'static> Finalize for Cyclic<T> {
+    impl<T> Finalize for Cyclic<T> {
     }
 
-    fn new<T: Default + 'static>() -> Cc<Cyclic<T>> {
+    fn new<T: Default>() -> Cc<Cyclic<T>> {
         let cc = Cc::new(Cyclic {
             cyclic: RefCell::new(None),
             _t: Default::default(),

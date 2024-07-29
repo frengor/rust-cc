@@ -1,5 +1,5 @@
 #![cfg(not(miri))] // This test leaks memory, so it can't be run by Miri
-#![cfg(all(feature = "weak-ptr", feature = "derive"))]
+#![cfg(all(feature = "weak-ptrs", feature = "derive"))]
 //! This module tests that `Weak::upgrade` returns None when called in destructors while collecting.
 
 use std::cell::RefCell;
@@ -14,7 +14,7 @@ struct Ignored<T: Trace + 'static> {
     should_panic: bool,
 }
 
-impl<T: Trace + 'static> Drop for Ignored<T> {
+impl<T: Trace> Drop for Ignored<T> {
     fn drop(&mut self) {
         // This is safe to implement
         assert!(self.weak.upgrade().is_none());
@@ -57,7 +57,7 @@ fn cyclic_upgrade(should_panic: bool) {
     struct Allocated {
         #[rust_cc(ignore)]
         _ignored: Ignored<Allocated>,
-        cyclic: RefCell<Option<WeakableCc<Self>>>,
+        cyclic: RefCell<Option<Cc<Self>>>,
     }
 
     let cc1 = Cc::new_cyclic(|weak| Allocated {
@@ -101,6 +101,6 @@ fn cyclic_upgrade(should_panic: bool) {
     assert_eq!(should_panic, res.is_err());
 
     assert!(weak1.upgrade().is_none());
-    assert!(weak2.upgrade().is_none()); // This fails now |o|
+    assert!(weak2.upgrade().is_none());
     assert!(weak3.upgrade().is_none());
 }

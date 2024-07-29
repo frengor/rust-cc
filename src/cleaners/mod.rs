@@ -16,7 +16,7 @@
 //! 
 //! # Avoiding memory leaks
 //! 
-//! Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture** a reference to the containing object
+//! Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture** a reference to the container object
 //! inside the cleaning action closure, otherwise the object will be leaked and the cleaning action will never be executed.
 //! 
 //! # Cleaners vs finalization
@@ -26,18 +26,18 @@
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
-
+use core::fmt::{self, Debug, Formatter};
 use slotmap::{new_key_type, SlotMap};
 
-use crate::{Context, Finalize, Trace};
-use crate::weak::{Weak, WeakableCc};
+use crate::{Cc, Context, Finalize, Trace};
+use crate::weak::Weak;
 
 new_key_type! {
     struct CleanerKey;
 }
 
 struct CleanerMap {
-    map: RefCell<Option<SlotMap<CleanerKey, CleanerFn>>>, // The Option is used to avoid allocating until a cleaning action is registered
+    map: RefCell<Option<SlotMap<CleanerKey, CleaningAction>>>, // The Option is used to avoid allocating until a cleaning action is registered
 }
 
 unsafe impl Trace for CleanerMap {
@@ -48,9 +48,10 @@ unsafe impl Trace for CleanerMap {
 
 impl Finalize for CleanerMap {}
 
-struct CleanerFn(Option<Box<dyn FnOnce() + 'static>>);
+struct CleaningAction(Option<Box<dyn FnOnce() + 'static>>);
 
-impl Drop for CleanerFn {
+impl Drop for CleaningAction {
+    #[inline]
     fn drop(&mut self) {
         if let Some(fun) = self.0.take() {
             fun();
@@ -62,16 +63,15 @@ impl Drop for CleanerFn {
 ///
 /// All the cleaning actions registered in a `Cleaner` are run when it is dropped, unless they have been manually executed before.
 pub struct Cleaner {
-    cleaner_map: WeakableCc<CleanerMap>,
+    cleaner_map: Cc<CleanerMap>,
 }
 
 impl Cleaner {
     /// Creates a new [`Cleaner`].
-    #[allow(clippy::new_without_default)]
     #[inline]
     pub fn new() -> Cleaner {
         Cleaner {
-            cleaner_map: WeakableCc::new_weakable(CleanerMap {
+            cleaner_map: Cc::new(CleanerMap {
                 map: RefCell::new(None),
             }),
         }
@@ -83,7 +83,7 @@ impl Cleaner {
     ///
     /// # Avoiding memory leaks
     /// Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture**
-    /// a reference to the containing object inside the `action` closure, otherwise the object will
+    /// a reference to the container object inside the `action` closure, otherwise the object will
     /// be leaked and the cleaning action will never be executed.
     #[inline]
     pub fn register(&self, action: impl FnOnce() + 'static) -> Cleanable {
@@ -91,7 +91,7 @@ impl Cleaner {
             .map
             .borrow_mut()
             .get_or_insert_with(|| SlotMap::with_capacity_and_key(3))
-            .insert(CleanerFn(Some(Box::new(action))));
+            .insert(CleaningAction(Some(Box::new(action))));
 
         Cleanable {
             cleaner_map: self.cleaner_map.downgrade(),
@@ -110,12 +110,26 @@ unsafe impl Trace for Cleaner {
     fn trace(&self, _: &mut Context<'_>) {
         // DO NOT TRACE self.cleaner_map, it would be unsound!
         // If self.cleaner_map would be traced here, it would be possible to have cleaning actions called
-        // with a reference to the cleaned object accessible from inside the clean function.
+        // with a reference to the cleaned object accessible from inside the cleaning action itself.
         // This would be unsound, since cleaning actions are called from the Drop implementation of Ccs (see the Trace trait safety section)
     }
 }
 
 impl Finalize for Cleaner {}
+
+impl Default for Cleaner {
+    #[inline]
+    fn default() -> Self {
+        Cleaner::new()
+    }
+}
+
+impl Debug for Cleaner {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cleaner").finish_non_exhaustive()
+    }
+}
 
 /// A `Cleanable` represents a cleaning action registered in a [`Cleaner`].
 pub struct Cleanable {
@@ -147,3 +161,10 @@ unsafe impl Trace for Cleanable {
 }
 
 impl Finalize for Cleanable {}
+
+impl Debug for Cleanable {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cleanable").finish_non_exhaustive()
+    }
+}

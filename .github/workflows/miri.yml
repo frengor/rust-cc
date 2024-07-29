@@ -7,7 +7,7 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  test-with-miri:
+  test-with-miri-stable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -24,5 +24,19 @@ jobs:
       - name: Run tests
         # Keep "std" feature always enabled here to avoid needing the no-std related nightly features
         run: cargo hack miri test --feature-powerset --skip nightly,derive --verbose -F std,pedantic-debug-assertions
+  test-with-miri-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # From Miri documentation: https://github.com/rust-lang/miri#running-miri-on-ci
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - uses: taiki-e/install-action@cargo-hack
+      # Always skip "derive" since derive macro tests are skipped on Miri
+      # Also always keep "pedantic-debug-assertions" enabled to reduce build times
+      # Note: no need to use --workspace here, since there's no unsafe in rust-cc-derive
       - name: Run tests (nightly)
         run: cargo hack miri test --feature-powerset --skip derive --verbose -F nightly,pedantic-debug-assertions

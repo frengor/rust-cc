@@ -1,9 +1,8 @@
 use std::cell::Cell;
-use std::ops::Deref;
 use std::panic::catch_unwind;
 use crate::*;
 use super::reset_state;
-use crate::weak::{Weak, Weakable, WeakableCc};
+use crate::weak::Weak;
 
 #[test]
 fn weak_test() {
@@ -44,22 +43,22 @@ fn weak_test2() {
     collect_cycles();
 }
 
-fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
+fn weak_test_common() -> (Cc<i32>, Weak<i32>) {
     reset_state();
 
-    let cc: Cc<Weakable<i32>> = WeakableCc::new_weakable(0i32);
+    let cc: Cc<i32> = Cc::new(0i32);
 
-    assert!(!cc.deref().has_allocated());
+    assert!(!cc.inner().counter_marker().has_allocated_for_metadata());
     assert_eq!(0, cc.weak_count());
     assert_eq!(1, cc.strong_count());
 
     let cc1 = cc.clone();
 
-    assert!(!cc.deref().has_allocated());
+    assert!(!cc.inner().counter_marker().has_allocated_for_metadata());
 
     let weak = cc.downgrade();
 
-    assert!(cc.deref().has_allocated());
+    assert!(cc.inner().counter_marker().has_allocated_for_metadata());
 
     assert_eq!(2, cc.strong_count());
     assert_eq!(1, weak.weak_count());
@@ -103,8 +102,8 @@ fn weak_test_common() -> (WeakableCc<i32>, Weak<i32>) {
 fn weak_dst() {
     reset_state();
 
-    let cc = Cc::new_weakable(0i32);
-    let cc1: WeakableCc<dyn Trace> = cc.clone();
+    let cc = Cc::new(0i32);
+    let cc1: Cc<dyn Trace> = cc.clone();
     let _weak: Weak<dyn Trace> = cc.downgrade();
     let _weak1: Weak<dyn Trace> = cc1.downgrade();
 }
@@ -136,7 +135,7 @@ fn test_new_cyclic() {
         }
     });
 
-    assert!(cyclic.deref().has_allocated());
+    assert!(cyclic.inner().counter_marker().has_allocated_for_metadata());
 
     assert_eq!(1, cyclic.weak_count());
     assert_eq!(1, cyclic.strong_count());
@@ -150,7 +149,8 @@ fn test_new_cyclic() {
 fn panicking_new_cyclic1() {
     reset_state();
 
-    let _cc = Cc::new_cyclic(|_| {
+    #[allow(clippy::unused_unit)] // Unit type needed to fix never type fallback error
+    let _cc = Cc::new_cyclic(|_| -> () {
         panic!("Expected panic during panicking_new_cyclic1!");
     });
 }
@@ -160,7 +160,8 @@ fn panicking_new_cyclic1() {
 fn panicking_new_cyclic2() {
     reset_state();
 
-    let _cc = Cc::new_cyclic(|weak| {
+    #[allow(clippy::unused_unit)] // Unit type needed to fix never type fallback error
+    let _cc = Cc::new_cyclic(|weak| -> () {
         let _weak = weak.clone();
         panic!("Expected panic during panicking_new_cyclic2!");
     });
@@ -270,7 +271,7 @@ fn try_upgrade_and_resurrect_in_finalize_and_drop() {
     reset_state();
 
     thread_local! {
-        static RESURRECTED: Cell<Option<WeakableCc<Cyclic>>> = Cell::new(None);
+        static RESURRECTED: Cell<Option<Cc<Cyclic>>> = Cell::new(None);
     }
 
     struct Cyclic {
@@ -322,7 +323,7 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
     }
 
     struct Cyclic {
-        cyclic: RefCell<Option<WeakableCc<Cyclic>>>,
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
         weak: Weak<Cyclic>,
     }
 
@@ -349,7 +350,7 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
     }
 
     let weak: Weak<Cyclic> = {
-        let cc: Cc<Weakable<Cyclic>> = WeakableCc::new_cyclic(|weak| Cyclic {
+        let cc: Cc<Cyclic> = Cc::new_cyclic(|weak| Cyclic {
             cyclic: RefCell::new(None),
             weak: weak.clone(),
         });
@@ -372,4 +373,42 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
         assert!(FINALIZED.with(|finalized| finalized.get()));
     }
     assert!(DROPPED.with(|dropped| dropped.get()));
+}
+
+#[test]
+fn weak_new() {
+    reset_state();
+    
+    let new: Weak<u32> = Weak::new();
+
+    assert_eq!(0, new.weak_count());
+    assert_eq!(0, new.strong_count());
+    assert!(new.upgrade().is_none());
+
+    let other = new.clone();
+
+    assert_eq!(0, other.weak_count());
+    assert_eq!(0, other.strong_count());
+    assert!(other.upgrade().is_none());
+}
+
+#[test]
+fn weak_new_ptr_eq() {
+    reset_state();
+    
+    let new: Weak<u32> = Weak::new();
+    let other_new: Weak<u32> = Weak::new();
+    
+    let cc = Cc::new(5u32);
+    let other_cc = Cc::new(6u32);
+
+    assert_eq!(0, new.weak_count());
+    assert_eq!(0, new.strong_count());
+
+    assert!(Weak::ptr_eq(&new, &new));
+    assert!(Weak::ptr_eq(&new, &other_new));
+    assert!(Weak::ptr_eq(&new, &new.clone()));
+    assert!(!Weak::ptr_eq(&new, &cc.downgrade()));
+    assert!(Weak::ptr_eq(&cc.downgrade(), &cc.downgrade()));
+    assert!(!Weak::ptr_eq(&cc.downgrade(), &other_cc.downgrade()));
 }

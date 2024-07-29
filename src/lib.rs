@@ -64,28 +64,26 @@ collect_cycles();
 //! ### Weak pointers
 //!
 #![cfg_attr(
-    feature = "weak-ptr",
+    feature = "weak-ptrs",
     doc = r"```rust"
 )]
 #![cfg_attr(
-    not(feature = "weak-ptr"),
+    not(feature = "weak-ptrs"),
     doc = r"```rust,ignore"
 )]
 #![doc = r"# use rust_cc::*;
 # use rust_cc::weak::*;
-// Only Ccs containing a Weakable<_> support weak pointers
-// (WeakableCc<T> is just an alias for Cc<Weakable<T>>)
-let weakable: WeakableCc<i32> = Cc::new_weakable(5);
+let cc: Cc<i32> = Cc::new(5);
  
 // Obtain a weak pointer
-let weak_ptr: Weak<i32> = weakable.downgrade();
+let weak_ptr: Weak<i32> = cc.downgrade();
  
 // Upgrading a weak pointer cannot fail if the pointed allocation isn't deallocated
-let upgraded: Option<WeakableCc<i32>> = weak_ptr.upgrade();
+let upgraded: Option<Cc<i32>> = weak_ptr.upgrade();
 assert!(upgraded.is_some());
 
 // Deallocate the object
-drop(weakable);
+drop(cc);
 drop(upgraded);
 
 // Upgrading now fails
@@ -140,7 +138,6 @@ cleanable.clean();
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![allow(clippy::thread_local_initializer_can_be_made_const)]
-#![allow(unexpected_cfgs)]
 
 #[cfg(all(not(feature = "std"), not(feature = "nightly")))]
 compile_error!("Feature \"std\" cannot be disabled without enabling feature \"nightly\" (due to #[thread_local] not being stable).");
@@ -176,7 +173,7 @@ pub mod config;
 #[cfg(feature = "derive")]
 mod derives;
 
-#[cfg(feature = "weak-ptr")]
+#[cfg(feature = "weak-ptrs")]
 pub mod weak;
 
 #[cfg(feature = "cleaners")]
@@ -212,19 +209,17 @@ pub fn collect_cycles() {
 
 #[cfg(feature = "auto-collect")]
 #[inline(never)]
-pub(crate) fn trigger_collection() {
-    let _ = try_state(|state| {
-        if state.is_collecting() {
-            return;
+pub(crate) fn trigger_collection(state: &State) {
+    if state.is_collecting() {
+        return;
+    }
+
+    let _ = POSSIBLE_CYCLES.try_with(|pc| {
+        if config::config(|config| config.should_collect(state, pc)).unwrap_or(false) {
+            collect(state, pc);
+
+            adjust_trigger_point(state);
         }
-
-        let _ = POSSIBLE_CYCLES.try_with(|pc| {
-            if config::config(|config| config.should_collect(state, pc)).unwrap_or(false) {
-                collect(state, pc);
-
-                adjust_trigger_point(state);
-            }
-        });
     });
 }
 
@@ -397,15 +392,16 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
     impl Drop for ToDropList {
         #[inline]
         fn drop(&mut self) {
-            // Remove the remaining elements from the list, setting them as dropped
+            // Remove the elements from the list, setting them as dropped
             // This feature is used only in weak pointers, so do this only if they're enabled
-            #[cfg(feature = "weak-ptr")]
+            #[cfg(feature = "weak-ptrs")]
             while let Some(ptr) = self.list.remove_first() {
-                unsafe { ptr.as_ref() }.counter_marker().set_dropped(true);
+                // Always set the mark, since it has been cleared by remove_first
+                unsafe { ptr.as_ref() }.counter_marker().mark(Mark::Dropped);
             }
 
             // If not using weak pointers, just call the list's drop implementation
-            #[cfg(not(feature = "weak-ptr"))]
+            #[cfg(not(feature = "weak-ptrs"))]
             unsafe {
                 ManuallyDrop::drop(&mut self.list);
             }
@@ -425,12 +421,8 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
         unsafe {
             debug_assert!(ptr.as_ref().counter_marker().is_traced());
 
-            // Set the object as dropped before dropping it
-            // This feature is used only in weak pointers, so do this only if they're enabled
-            #[cfg(feature = "weak-ptr")]
-            {
-                ptr.as_ref().counter_marker().set_dropped(true);
-            }
+            #[cfg(feature = "weak-ptrs")]
+            ptr.as_ref().drop_metadata();
 
             CcBox::drop_inner(ptr.cast());
         };

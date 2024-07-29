@@ -1,10 +1,16 @@
 use alloc::alloc::Layout;
+use alloc::rc::Rc;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, drop_in_place, NonNull};
-use alloc::rc::Rc;
+use core::borrow::Borrow;
+use core::cell::Cell;
+use core::fmt::{self, Debug, Display, Formatter, Pointer};
+use core::cmp::Ordering;
+use core::hash::{Hash, Hasher};
+use core::panic::{RefUnwindSafe, UnwindSafe};
 #[cfg(feature = "nightly")]
 use core::{
     marker::Unsize,
@@ -18,6 +24,8 @@ use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
+#[cfg(feature = "weak-ptrs")]
+use crate::weak::weak_counter_marker::WeakCounterMarker;
 
 /// A thread-local cycle collected pointer.
 ///
@@ -36,7 +44,7 @@ where
 {
 }
 
-impl<T: Trace + 'static> Cc<T> {
+impl<T: Trace> Cc<T> {
     /// Creates a new `Cc`.
     /// 
     /// # Collection
@@ -48,7 +56,6 @@ impl<T: Trace + 'static> Cc<T> {
     /// # Panics
     /// 
     /// Panics if the automatically-stared collection panics.
-    #[inline(always)]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
@@ -59,7 +66,7 @@ impl<T: Trace + 'static> Cc<T> {
             }
 
             #[cfg(feature = "auto-collect")]
-            super::trigger_collection();
+            super::trigger_collection(state);
 
             Cc {
                 inner: CcBox::new(t, state),
@@ -98,7 +105,7 @@ impl<T: Trace + 'static> Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Cc<T> {
+impl<T: ?Sized + Trace> Cc<T> {
     /// Returns `true` if the two [`Cc`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
@@ -165,13 +172,13 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
         unsafe { self.inner.as_ref() }
     }
 
-    #[cfg(feature = "weak-ptr")]
+    #[cfg(feature = "weak-ptrs")]
     #[inline(always)]
     pub(crate) fn inner_ptr(&self) -> NonNull<CcBox<T>> {
         self.inner
     }
 
-    #[cfg(feature = "weak-ptr")] // Currently used only here
+    #[cfg(feature = "weak-ptrs")] // Currently used only here
     #[inline(always)]
     #[must_use]
     pub(crate) fn __new_internal(inner: NonNull<CcBox<T>>) -> Cc<T> {
@@ -182,7 +189,7 @@ impl<T: ?Sized + Trace + 'static> Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
+impl<T: ?Sized + Trace> Clone for Cc<T> {
     /// Makes a clone of the [`Cc`] pointer.
     /// 
     /// This creates another pointer to the same allocation, increasing the strong reference count.
@@ -214,7 +221,7 @@ impl<T: ?Sized + Trace + 'static> Clone for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
+impl<T: ?Sized + Trace> Deref for Cc<T> {
     type Target = T;
 
     #[inline]
@@ -231,7 +238,7 @@ impl<T: ?Sized + Trace + 'static> Deref for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
+impl<T: ?Sized + Trace> Drop for Cc<T> {
     fn drop(&mut self) {
         #[cfg(debug_assertions)]
         if state(|state| state.is_tracing()) {
@@ -239,14 +246,14 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
         }
 
         #[inline]
-        fn decrement_counter<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+        fn decrement_counter<T: ?Sized + Trace>(cc: &Cc<T>) {
             // Always decrement the counter
             let res = cc.counter_marker().decrement_counter();
             debug_assert!(res.is_ok());
         }
 
         #[inline]
-        fn handle_possible_cycle<T: ?Sized + Trace + 'static>(cc: &Cc<T>) {
+        fn handle_possible_cycle<T: ?Sized + Trace>(cc: &Cc<T>) {
             decrement_counter(cc);
 
             // We know that we're not part of either root_list or non_root_list, since the cc isn't traced
@@ -255,7 +262,8 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
 
         // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
         // In this case, no further action has to be taken, except decrementing the reference counter.
-        if self.counter_marker().is_traced() {
+        // Skip the rest of the code also when the value has already been dropped
+        if self.counter_marker().is_traced_or_dropped() {
             decrement_counter(self);
             return;
         }
@@ -287,11 +295,13 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
                 let _dropping_guard = replace_state_field!(dropping, true, state);
                 let layout = self.inner().layout();
 
-                // Set the object as dropped before dropping and deallocating it
-                // This feature is used only in weak pointers, so do this only if they're enabled
-                #[cfg(feature = "weak-ptr")]
+                #[cfg(feature = "weak-ptrs")]
                 {
-                    self.counter_marker().set_dropped(true);
+                    // Set the object as dropped before dropping and deallocating it
+                    // This feature is used only in weak pointers, so do this only if they're enabled
+                    self.counter_marker().mark(Mark::Dropped);
+
+                    self.inner().drop_metadata();
                 }
 
                 // SAFETY: we're the only one to have a pointer to this allocation
@@ -314,7 +324,7 @@ impl<T: ?Sized + Trace + 'static> Drop for Cc<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
+unsafe impl<T: ?Sized + Trace> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
@@ -324,18 +334,14 @@ unsafe impl<T: ?Sized + Trace + 'static> Trace for Cc<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for Cc<T> {}
+impl<T: ?Sized + Trace> Finalize for Cc<T> {}
 
 #[repr(C)]
 pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
     next: UnsafeCell<Option<NonNull<CcBox<()>>>>,
     prev: UnsafeCell<Option<NonNull<CcBox<()>>>>,
 
-    #[cfg(feature = "nightly")]
-    vtable: DynMetadata<dyn InternalTrace>,
-
-    #[cfg(not(feature = "nightly"))]
-    fat_ptr: NonNull<dyn InternalTrace>,
+    metadata: Cell<Metadata>,
 
     counter_marker: CounterMarker,
     _phantom: PhantomData<Rc<()>>, // Make CcBox !Send and !Sync
@@ -345,8 +351,7 @@ pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
     elem: UnsafeCell<T>,
 }
 
-impl<T: Trace + 'static> CcBox<T> {
-    #[inline(always)]
+impl<T: Trace> CcBox<T> {
     #[must_use]
     fn new(t: T, state: &State) -> NonNull<CcBox<T>> {
         let layout = Layout::new::<CcBox<T>>();
@@ -363,10 +368,7 @@ impl<T: Trace + 'static> CcBox<T> {
                 CcBox {
                     next: UnsafeCell::new(None),
                     prev: UnsafeCell::new(None),
-                    #[cfg(feature = "nightly")]
-                    vtable: metadata(ptr.as_ptr() as *mut dyn InternalTrace),
-                    #[cfg(not(feature = "nightly"))]
-                    fat_ptr: NonNull::new_unchecked(ptr.as_ptr() as *mut dyn InternalTrace),
+                    metadata: Metadata::new(ptr),
                     counter_marker: CounterMarker::new_with_counter_to_one(already_finalized),
                     _phantom: PhantomData,
                     elem: UnsafeCell::new(t),
@@ -376,7 +378,6 @@ impl<T: Trace + 'static> CcBox<T> {
         }
     }
 
-    #[inline(always)]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcBox<T>> {
@@ -384,7 +385,7 @@ impl<T: Trace + 'static> CcBox<T> {
     }
 }
 
-impl<T: ?Sized + Trace + 'static> CcBox<T> {
+impl<T: ?Sized + Trace> CcBox<T> {
     #[inline]
     pub(crate) fn get_elem(&self) -> &T {
         unsafe { &*self.elem.get() }
@@ -404,12 +405,72 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
     pub(crate) fn layout(&self) -> Layout {
         #[cfg(feature = "nightly")]
         {
-            self.vtable.layout()
+            self.vtable().vtable.layout()
         }
 
         #[cfg(not(feature = "nightly"))]
         unsafe {
-            Layout::for_value(self.fat_ptr.as_ref())
+            Layout::for_value(self.vtable().fat_ptr.as_ref())
+        }
+    }
+
+    #[inline]
+    fn vtable(&self) -> VTable {
+        #[cfg(feature = "weak-ptrs")]
+        unsafe {
+            if self.counter_marker.has_allocated_for_metadata() {
+                self.metadata.get().boxed_metadata.as_ref().vtable
+            } else {
+                self.metadata.get().vtable
+            }
+        }
+
+        #[cfg(not(feature = "weak-ptrs"))]
+        unsafe {
+            self.metadata.get().vtable
+        }
+    }
+
+    #[cfg(feature = "weak-ptrs")]
+    #[inline]
+    pub(crate) fn get_or_init_metadata(&self) -> NonNull<BoxedMetadata> {
+        unsafe {
+            if self.counter_marker.has_allocated_for_metadata() {
+                self.metadata.get().boxed_metadata
+            } else {
+                let vtable = self.metadata.get().vtable;
+                let ptr = BoxedMetadata::new(vtable, WeakCounterMarker::new(true));
+                self.metadata.set(Metadata {
+                    boxed_metadata: ptr,
+                });
+                self.counter_marker.set_allocated_for_metadata(true);
+                ptr
+            }
+        }
+    }
+
+    /// # Safety
+    /// The metadata must have been allocated.
+    #[cfg(feature = "weak-ptrs")]
+    #[inline(always)]
+    pub(crate) unsafe fn get_metadata_unchecked(&self) -> NonNull<BoxedMetadata> {
+        self.metadata.get().boxed_metadata
+    }
+
+    #[cfg(feature = "weak-ptrs")]
+    #[inline]
+    pub(crate) fn drop_metadata(&self) {
+        if self.counter_marker.has_allocated_for_metadata() {
+            unsafe {
+                let boxed = self.get_metadata_unchecked();
+                if boxed.as_ref().weak_counter_marker.counter() == 0 {
+                    // There are no weak pointers, deallocate the metadata
+                    dealloc_other(boxed);
+                } else {
+                    // There exist weak pointers, set the CcBox allocation not accessible
+                    boxed.as_ref().weak_counter_marker.set_accessible(false);
+                }
+            }
         }
     }
 
@@ -424,14 +485,14 @@ impl<T: ?Sized + Trace + 'static> CcBox<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for CcBox<T> {
+unsafe impl<T: ?Sized + Trace> Trace for CcBox<T> {
     #[inline(always)]
     fn trace(&self, ctx: &mut Context<'_>) {
         self.get_elem().trace(ctx);
     }
 }
 
-impl<T: ?Sized + Trace + 'static> Finalize for CcBox<T> {
+impl<T: ?Sized + Trace> Finalize for CcBox<T> {
     #[inline(always)]
     fn finalize(&self) {
         self.get_elem().finalize();
@@ -528,6 +589,13 @@ impl CcBox<()> {
     /// SAFETY: `drop_in_place` conditions must be true.
     #[inline]
     pub(super) unsafe fn drop_inner(ptr: NonNull<Self>) {
+        #[cfg(feature = "weak-ptrs")]
+        {
+            // Set the object as dropped before dropping it
+            // This feature is used only in weak pointers, so do this only if they're enabled
+            ptr.as_ref().counter_marker().mark(Mark::Dropped);
+        }
+
         CcBox::get_traceable(ptr).as_mut().drop_elem();
     }
 
@@ -535,13 +603,13 @@ impl CcBox<()> {
     fn get_traceable(ptr: NonNull<Self>) -> NonNull<dyn InternalTrace> {
         #[cfg(feature = "nightly")]
         unsafe {
-            let vtable = ptr.as_ref().vtable;
+            let vtable = ptr.as_ref().vtable().vtable;
             NonNull::from_raw_parts(ptr.cast(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
         unsafe {
-            ptr.as_ref().fat_ptr
+            ptr.as_ref().vtable().fat_ptr
         }
     }
 
@@ -660,6 +728,67 @@ impl CcBox<()> {
     }
 }
 
+#[derive(Copy, Clone)]
+union Metadata {
+    vtable: VTable,
+    #[cfg(feature = "weak-ptrs")]
+    boxed_metadata: NonNull<BoxedMetadata>,
+}
+
+impl Metadata {
+    #[inline]
+    fn new<T: Trace>(cc_box: NonNull<CcBox<T>>) -> Cell<Metadata> {
+        #[cfg(feature = "nightly")]
+        let vtable = VTable {
+            vtable: metadata(cc_box.as_ptr() as *mut dyn InternalTrace),
+        };
+
+        #[cfg(not(feature = "nightly"))]
+        let vtable = VTable {
+            fat_ptr: unsafe { // SAFETY: the ptr comes from a NotNull ptr
+                NonNull::new_unchecked(cc_box.as_ptr() as *mut dyn InternalTrace)
+            },
+        };
+
+        Cell::new(Metadata {
+            vtable
+        })
+    }
+}
+
+#[derive(Copy, Clone)]
+struct VTable {
+    #[cfg(feature = "nightly")]
+    vtable: DynMetadata<dyn InternalTrace>,
+
+    #[cfg(not(feature = "nightly"))]
+    fat_ptr: NonNull<dyn InternalTrace>,
+}
+
+#[cfg(feature = "weak-ptrs")]
+pub(crate) struct BoxedMetadata {
+    vtable: VTable,
+    pub(crate) weak_counter_marker: WeakCounterMarker,
+}
+
+#[cfg(feature = "weak-ptrs")]
+impl BoxedMetadata {
+    #[inline]
+    fn new(vtable: VTable, weak_counter_marker: WeakCounterMarker) -> NonNull<BoxedMetadata> {
+        unsafe {
+            let ptr: NonNull<BoxedMetadata> = alloc_other();
+            ptr::write(
+                ptr.as_ptr(),
+                BoxedMetadata {
+                    vtable,
+                    weak_counter_marker,
+                },
+            );
+            ptr
+        }
+    }
+}
+
 // Trait used to make it possible to drop/finalize only the elem field of CcBox
 // and without taking a &mut reference to the whole CcBox
 trait InternalTrace: Trace {
@@ -670,7 +799,7 @@ trait InternalTrace: Trace {
     unsafe fn drop_elem(&self);
 }
 
-impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
+impl<T: ?Sized + Trace> InternalTrace for CcBox<T> {
     #[cfg(feature = "finalization")]
     fn finalize_elem(&self) {
         self.get_elem().finalize();
@@ -680,3 +809,127 @@ impl<T: ?Sized + Trace + 'static> InternalTrace for CcBox<T> {
         drop_in_place(self.get_elem_mut());
     }
 }
+
+// ####################################
+// #          Cc Trait impls          #
+// ####################################
+
+impl<T: ?Sized + Trace + Default> Default for Cc<T> {
+    /// Creates a new [`Cc<T>`][`Cc`], with the [`Default`] value for `T`.
+    ///
+    /// # Collection
+    ///
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    ///
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    #[inline]
+    fn default() -> Self {
+        Cc::new(<T as Default>::default())
+    }
+}
+
+impl<T: ?Sized + Trace> AsRef<T> for Cc<T> {
+    #[inline(always)]
+    fn as_ref(&self) -> &T {
+        self
+    }
+}
+
+impl<T: ?Sized + Trace> Borrow<T> for Cc<T> {
+    #[inline(always)]
+    fn borrow(&self) -> &T {
+        self
+    }
+}
+
+impl<T: Trace> From<T> for Cc<T> {
+    /// Converts a generic `T` into a [`Cc<T>`][`Cc`].
+    ///
+    /// # Collection
+    ///
+    /// This method may start a collection when the `auto-collect` feature is enabled.
+    ///
+    /// See the [`config` module documentation][`mod@crate::config`] for more details.
+    #[inline]
+    fn from(value: T) -> Self {
+        Cc::new(value)
+    }
+}
+
+// TODO impl From<Box<T>> for Cc<T>
+// TODO impl TryFrom<T> for Cc<T> when Cc::try_new will be implemented
+
+impl<T: ?Sized + Trace + Debug> Debug for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&**self, f)
+    }
+}
+
+impl<T: ?Sized + Trace + Display> Display for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&**self, f)
+    }
+}
+
+impl<T: ?Sized + Trace> Pointer for Cc<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Pointer::fmt(&ptr::addr_of!(**self), f)
+    }
+}
+
+impl<T: ?Sized + Trace + PartialEq> PartialEq for Cc<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: ?Sized + Trace + Eq> Eq for Cc<T> {}
+
+impl<T: ?Sized + Trace + Ord> Ord for Cc<T> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
+
+impl<T: ?Sized + Trace + PartialOrd> PartialOrd for Cc<T> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (**self).partial_cmp(&**other)
+    }
+
+    #[inline]
+    fn lt(&self, other: &Self) -> bool {
+        **self < **other
+    }
+
+    #[inline]
+    fn le(&self, other: &Self) -> bool {
+        **self <= **other
+    }
+
+    #[inline]
+    fn gt(&self, other: &Self) -> bool {
+        **self > **other
+    }
+
+    #[inline]
+    fn ge(&self, other: &Self) -> bool {
+        **self >= **other
+    }
+}
+
+impl<T: ?Sized + Trace + Hash> Hash for Cc<T> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (**self).hash(state);
+    }
+}
+
+impl<T: ?Sized + Trace + UnwindSafe> UnwindSafe for Cc<T> {}
+
+impl<T: ?Sized + Trace + RefUnwindSafe> RefUnwindSafe for Cc<T> {}

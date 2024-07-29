@@ -253,16 +253,16 @@ impl<T> Finalize for MaybeUninit<T> {
     fn finalize(&self) {}
 }*/
 
-unsafe impl<T> Trace for PhantomData<T> {
+unsafe impl<T: ?Sized> Trace for PhantomData<T> {
     #[inline(always)]
     fn trace(&self, _: &mut Context<'_>) {}
 }
 
-impl<T> Finalize for PhantomData<T> {}
+impl<T: ?Sized> Finalize for PhantomData<T> {}
 
 macro_rules! deref_trace {
     ($generic:ident; $this:ty; $($bound:tt)*) => {
-        unsafe impl<$generic: $($bound)* $crate::trace::Trace + 'static> $crate::trace::Trace for $this
+        unsafe impl<$generic: $($bound)* $crate::trace::Trace> $crate::trace::Trace for $this
         {
             #[inline]
             fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
@@ -271,7 +271,7 @@ macro_rules! deref_trace {
             }
         }
 
-        impl<$generic: $($bound)* $crate::trace::Finalize + 'static> $crate::trace::Finalize for $this
+        impl<$generic: $($bound)* $crate::trace::Finalize> $crate::trace::Finalize for $this
         {
             #[inline]
             fn finalize(&self) {
@@ -307,16 +307,16 @@ deref_traces_sized! {
     AssertUnwindSafe,
 }
 
-unsafe impl<T: ?Sized + Trace + 'static> Trace for RefCell<T> {
+unsafe impl<T: ?Sized + Trace> Trace for RefCell<T> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if let Ok(borrow) = self.try_borrow() {
+        if let Ok(borrow) = self.try_borrow_mut() {
             borrow.trace(ctx);
         }
     }
 }
 
-impl<T: ?Sized + Finalize + 'static> Finalize for RefCell<T> {
+impl<T: ?Sized + Finalize> Finalize for RefCell<T> {
     #[inline]
     fn finalize(&self) {
         if let Ok(borrow) = self.try_borrow() {
@@ -325,7 +325,7 @@ impl<T: ?Sized + Finalize + 'static> Finalize for RefCell<T> {
     }
 }
 
-unsafe impl<T: Trace + 'static> Trace for Option<T> {
+unsafe impl<T: Trace> Trace for Option<T> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         if let Some(inner) = self {
@@ -334,7 +334,7 @@ unsafe impl<T: Trace + 'static> Trace for Option<T> {
     }
 }
 
-impl<T: Finalize + 'static> Finalize for Option<T> {
+impl<T: Finalize> Finalize for Option<T> {
     #[inline]
     fn finalize(&self) {
         if let Some(value) = self {
@@ -343,7 +343,7 @@ impl<T: Finalize + 'static> Finalize for Option<T> {
     }
 }
 
-unsafe impl<R: Trace + 'static, E: Trace + 'static> Trace for Result<R, E> {
+unsafe impl<R: Trace, E: Trace> Trace for Result<R, E> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         match self {
@@ -353,7 +353,7 @@ unsafe impl<R: Trace + 'static, E: Trace + 'static> Trace for Result<R, E> {
     }
 }
 
-impl<R: Finalize + 'static, E: Finalize + 'static> Finalize for Result<R, E> {
+impl<R: Finalize, E: Finalize> Finalize for Result<R, E> {
     #[inline]
     fn finalize(&self) {
         match self {
@@ -363,7 +363,7 @@ impl<R: Finalize + 'static, E: Finalize + 'static> Finalize for Result<R, E> {
     }
 }
 
-unsafe impl<T: Trace + 'static, const N: usize> Trace for [T; N] {
+unsafe impl<T: Trace, const N: usize> Trace for [T; N] {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         for elem in self {
@@ -372,7 +372,7 @@ unsafe impl<T: Trace + 'static, const N: usize> Trace for [T; N] {
     }
 }
 
-impl<T: Finalize + 'static, const N: usize> Finalize for [T; N] {
+impl<T: Finalize, const N: usize> Finalize for [T; N] {
     #[inline]
     fn finalize(&self) {
         for elem in self {
@@ -381,7 +381,7 @@ impl<T: Finalize + 'static, const N: usize> Finalize for [T; N] {
     }
 }
 
-unsafe impl<T: Trace + 'static> Trace for [T] {
+unsafe impl<T: Trace> Trace for [T] {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         for elem in self {
@@ -390,7 +390,7 @@ unsafe impl<T: Trace + 'static> Trace for [T] {
     }
 }
 
-impl<T: Finalize + 'static> Finalize for [T] {
+impl<T: Finalize> Finalize for [T] {
     #[inline]
     fn finalize(&self) {
         for elem in self {
@@ -399,7 +399,7 @@ impl<T: Finalize + 'static> Finalize for [T] {
     }
 }
 
-unsafe impl<T: Trace + 'static> Trace for Vec<T> {
+unsafe impl<T: Trace> Trace for Vec<T> {
     #[inline]
     fn trace(&self, ctx: &mut Context<'_>) {
         for elem in self {
@@ -408,7 +408,7 @@ unsafe impl<T: Trace + 'static> Trace for Vec<T> {
     }
 }
 
-impl<T: Finalize + 'static> Finalize for Vec<T> {
+impl<T: Finalize> Finalize for Vec<T> {
     #[inline]
     fn finalize(&self) {
         for elem in self {
@@ -421,7 +421,7 @@ macro_rules! tuple_finalize_trace {
     ($($args:ident),+) => {
         #[allow(non_snake_case)]
         unsafe impl<$($args),*> $crate::trace::Trace for ($($args,)*)
-        where $($args: $crate::trace::Trace + 'static),*
+        where $($args: $crate::trace::Trace),*
         {
             #[inline]
             fn trace(&self, ctx: &mut $crate::trace::Context<'_>) {
@@ -437,7 +437,7 @@ macro_rules! tuple_finalize_trace {
 
         #[allow(non_snake_case)]
         impl<$($args),*> $crate::trace::Finalize for ($($args,)*)
-        where $($args: $crate::trace::Finalize + 'static),*
+        where $($args: $crate::trace::Finalize),*
         {
             #[inline]
             fn finalize(&self) {
