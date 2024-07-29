@@ -16,7 +16,7 @@
 //! 
 //! # Avoiding memory leaks
 //! 
-//! Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture** a reference to the containing object
+//! Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture** a reference to the container object
 //! inside the cleaning action closure, otherwise the object will be leaked and the cleaning action will never be executed.
 //! 
 //! # Cleaners vs finalization
@@ -83,7 +83,7 @@ impl Cleaner {
     ///
     /// # Avoiding memory leaks
     /// Usually, [`Cleaner`]s are stored inside a cycle-collected object. Make sure to **never capture**
-    /// a reference to the containing object inside the `action` closure, otherwise the object will
+    /// a reference to the container object inside the `action` closure, otherwise the object will
     /// be leaked and the cleaning action will never be executed.
     #[inline]
     pub fn register(&self, action: impl FnOnce() + 'static) -> Cleanable {
