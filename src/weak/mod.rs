@@ -135,7 +135,7 @@ impl<T: ?Sized + Trace> Weak<T> {
         self.weak_counter_marker().map_or(0, |wcm| wcm.counter() as u32)
     }
 
-    #[inline(always)]
+    #[inline]
     fn weak_counter_marker(&self) -> Option<&WeakCounterMarker> {
         Some(unsafe { &self.metadata?.as_ref().weak_counter_marker })
     }

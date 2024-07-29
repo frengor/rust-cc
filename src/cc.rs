@@ -56,7 +56,6 @@ impl<T: Trace> Cc<T> {
     /// # Panics
     /// 
     /// Panics if the automatically-stared collection panics.
-    #[inline(always)]
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new(t: T) -> Cc<T> {
@@ -353,7 +352,6 @@ pub(crate) struct CcBox<T: ?Sized + Trace + 'static> {
 }
 
 impl<T: Trace> CcBox<T> {
-    #[inline(always)]
     #[must_use]
     fn new(t: T, state: &State) -> NonNull<CcBox<T>> {
         let layout = Layout::new::<CcBox<T>>();
@@ -380,7 +378,6 @@ impl<T: Trace> CcBox<T> {
         }
     }
 
-    #[inline(always)]
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     #[must_use]
     pub(crate) fn new_for_tests(t: T) -> NonNull<CcBox<T>> {
@@ -853,7 +850,7 @@ impl<T: Trace> From<T> for Cc<T> {
     /// This method may start a collection when the `auto-collect` feature is enabled.
     ///
     /// See the [`config` module documentation][`mod@crate::config`] for more details.
-    #[inline(always)]
+    #[inline]
     fn from(value: T) -> Self {
         Cc::new(value)
     }
