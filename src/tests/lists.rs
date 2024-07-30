@@ -1,15 +1,16 @@
-use std::alloc::{dealloc, Layout};
-use std::any::Any;
+use std::alloc::Layout;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::NonNull;
 
-use crate::{CcBox, Mark};
-use crate::lists::*;
-use crate::counter_marker::CounterMarker;
-
 use test_case::{test_case, test_matrix};
 
-fn assert_contains(list: &impl ListMethodsExt, mut elements: Vec<i32>) {
+use crate::{CcBox, Mark};
+use crate::counter_marker::CounterMarker;
+use crate::lists::*;
+use crate::state::state;
+use crate::utils::cc_dealloc;
+
+fn assert_contains(list: &impl ListMethods, mut elements: Vec<i32>) {
     list.iter().for_each(|ptr| {
         // Test contains
         assert!(list.contains(ptr));
@@ -27,7 +28,7 @@ fn assert_contains(list: &impl ListMethodsExt, mut elements: Vec<i32>) {
     );
 }
 
-fn new_list(elements: &[i32], list: &mut impl ListMethodsExt) -> Vec<NonNull<CcBox<i32>>> {
+fn new_list(elements: &[i32], list: &mut impl ListMethods) -> Vec<NonNull<CcBox<i32>>> {
     elements
         .iter()
         .map(|&i| CcBox::new_for_tests(i))
@@ -47,13 +48,14 @@ fn deallocate(elements: Vec<NonNull<CcBox<i32>>>) {
             "{} has a prev",
             *ptr.as_ref().get_elem()
         );
-        dealloc(ptr.cast().as_ptr(), Layout::new::<CcBox<i32>>());
+        state(|state| cc_dealloc(ptr, Layout::new::<CcBox<i32>>(), state));
     });
 }
 
-fn check_list(list: &impl ListMethodsExt) {
+fn check_list(list: &impl ListMethods) {
     let mut iter = list.iter();
     let Some(first) = iter.next() else {
+        assert!(list.is_empty());
         list.assert_size(0);
         return;
     };
@@ -70,19 +72,21 @@ fn check_list(list: &impl ListMethodsExt) {
     list.assert_size(real_size);
 }
 
-#[test_case(List::new())]
-#[test_case(CountedList::new())]
-fn test_new(list: impl ListMethodsExt) {
-    assert!(list.first().is_none());
+#[test_case(LinkedList::new())]
+#[test_case(PossibleCycles::new())]
+fn test_new(mut list: impl ListMethods) {
+    assert!(list.is_empty());
     list.assert_size(0);
+    assert!(list.first().is_none());
+    assert!(list.remove_first().is_none());
 }
 
-#[test_case(List::new())]
-#[test_case(CountedList::new())]
-fn test_add(mut list: impl ListMethodsExt) {
+#[test_case(LinkedList::new())]
+#[test_case(PossibleCycles::new())]
+fn test_add(mut list: impl ListMethods) {
     let vec: Vec<i32> = vec![0, 1, 2];
 
-    assert!(list.first().is_none());
+    assert!(list.is_empty());
     let elements = new_list(&vec, &mut list);
     assert!(list.first().is_some());
 
@@ -95,10 +99,10 @@ fn test_add(mut list: impl ListMethodsExt) {
 }
 
 #[test_matrix(
-    [List::new(), CountedList::new()],
+    [LinkedList::new(), PossibleCycles::new()],
     [0, 1, 2, 3]
 )]
-fn test_remove(mut list: impl ListMethodsExt, index: usize) {
+fn test_remove(mut list: impl ListMethods, index: usize) {
     let mut elements = vec![0, 1, 2, 3];
     let vec = new_list(&elements, &mut list);
 
@@ -131,9 +135,58 @@ fn test_remove(mut list: impl ListMethodsExt, index: usize) {
     deallocate(vec);
 }
 
-#[test_case(List::new())]
-#[test_case(CountedList::new())]
-fn test_for_each_clearing_panic(mut list: impl ListMethodsExt) {
+#[test_case(LinkedList::new())]
+#[test_case(PossibleCycles::new())]
+fn test_remove_first(mut list: impl ListMethods) {
+    let mut elements = vec![0, 1, 2, 3];
+    let vec = new_list(&elements, &mut list);
+
+    // Mark to test the removal of the mark
+    list.iter().for_each(|ptr| unsafe {
+        ptr.as_ref().counter_marker().mark(Mark::Traced)
+    });
+
+    // Iterate over the list to get the elements in the correct order as in the list
+    elements = list.iter().map(|ptr| unsafe {
+        *ptr.cast::<CcBox<i32>>().as_ref().get_elem()
+    }).collect();
+
+    for element in elements {
+        let removed = list.remove_first().expect("List has smaller size then expected");
+
+        unsafe {
+            assert!(
+                (*removed.as_ref().get_next()).is_none(),
+                "Removed element has still a next."
+            );
+            assert!(
+                (*removed.as_ref().get_prev()).is_none(),
+                "Removed element has still a prev."
+            );
+            assert_eq!(
+                *removed.cast::<CcBox<i32>>().as_ref().get_elem(),
+                element,
+                "Removed wrong element"
+            );
+            let cm = removed.as_ref().counter_marker();
+            assert!(
+                cm.is_not_marked() && !cm.is_in_possible_cycles(),
+                "Removed element is still marked"
+            );
+        }
+
+        check_list(&list);
+    }
+
+    list.assert_size(0);
+    assert!(list.is_empty());
+    drop(list);
+    deallocate(vec);
+}
+
+#[test]
+fn test_for_each_clearing_panic() {
+    let mut list = LinkedList::new();
     let mut vec = new_list(&[0, 1, 2, 3], &mut list);
 
     for it in &mut vec {
@@ -165,28 +218,28 @@ fn test_for_each_clearing_panic(mut list: impl ListMethodsExt) {
     deallocate(vec);
 }
 
-#[test_case(List::new())]
-#[test_case(CountedList::new())]
-fn test_list_moving(mut list: impl ListMethodsExt) {
+#[test_case(LinkedList::new())]
+#[test_case(PossibleCycles::new())]
+fn test_list_moving(mut list: impl ListMethods) {
     let cc = CcBox::new_for_tests(5i32);
     list.add(cc.cast());
 
     let list_moved = list;
 
-    list_moved.into_iter().for_each(|elem| unsafe {
+    list_moved.iter().for_each(|elem| unsafe {
         assert_eq!(*elem.cast::<CcBox<i32>>().as_ref().get_elem(), 5i32);
     });
 
-    unsafe {
-        dealloc(cc.cast().as_ptr(), Layout::new::<CcBox<i32>>());
-    }
+    drop(list_moved);
+
+    deallocate(vec![cc]);
 }
 
 #[cfg(feature = "finalization")]
 #[test]
 fn test_mark_self_and_append() {
-    let mut list = CountedList::new();
-    let mut to_append = List::new();
+    let mut list = PossibleCycles::new();
+    let mut to_append = LinkedList::new();
     let elements: Vec<i32> = vec![0, 1, 2];
     let elements_to_append: Vec<i32> = vec![3, 4, 5];
     let elements_final: Vec<i32> = vec![0, 1, 2, 3, 4, 5];
@@ -221,8 +274,8 @@ fn test_mark_self_and_append() {
 #[cfg(feature = "finalization")]
 #[test]
 fn test_mark_self_and_append_empty_list() {
-    let mut list = CountedList::new();
-    let to_append = List::new();
+    let mut list = PossibleCycles::new();
+    let to_append = LinkedList::new();
     let elements: Vec<i32> = vec![0, 1, 2];
 
     let vec = new_list(&elements, &mut list);
@@ -250,8 +303,8 @@ fn test_mark_self_and_append_empty_list() {
 #[cfg(feature = "finalization")]
 #[test]
 fn test_mark_empty_self_and_append() {
-    let mut list = CountedList::new();
-    let mut to_append = List::new();
+    let list = PossibleCycles::new();
+    let mut to_append = LinkedList::new();
     let elements: Vec<i32> = vec![0, 1, 2];
 
     let vec = new_list(&elements, &mut to_append);
@@ -279,23 +332,22 @@ fn test_mark_empty_self_and_append() {
 #[cfg(feature = "finalization")]
 #[test]
 fn test_mark_empty_self_and_append_empty_list() {
-    let mut list = CountedList::new();
-    let to_append = List::new();
+    let list = PossibleCycles::new();
+    let to_append = LinkedList::new();
 
     unsafe {
         list.mark_self_and_append(Mark::PossibleCycles, to_append, 0);
     }
 
     list.assert_size(0);
-
     assert!(list.is_empty());
 }
 
 #[cfg(feature = "finalization")]
 #[test]
 fn test_swap_list() {
-    let mut list = CountedList::new();
-    let mut to_swap = List::new();
+    let mut list = PossibleCycles::new();
+    let mut to_swap = LinkedList::new();
     let elements: Vec<i32> = vec![0, 1, 2];
     let elements_to_swap: Vec<i32> = vec![3, 4, 5];
 
@@ -319,14 +371,90 @@ fn test_swap_list() {
     deallocate(vec_to_swap);
 }
 
-trait ListMethodsExt: ListMethods + Any {
+// Common methods to DRY in list's tests
+// Also, mutating methods always take a &mut reference, even for PossibleCycles
+trait ListMethods {
+    fn first(&self) -> Option<NonNull<CcBox<()>>>;
+
+    fn add(&mut self, ptr: NonNull<CcBox<()>>);
+
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>);
+
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>>;
+
+    fn is_empty(&self) -> bool;
+
+    fn iter(&self) -> Iter;
+
+    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool;
+
     fn assert_size(&self, expected_size: usize);
 }
 
-impl<T: ListMethods + Any> ListMethodsExt for T {
+impl ListMethods for LinkedList {
+    fn first(&self) -> Option<NonNull<CcBox<()>>> {
+        self.first()
+    }
+
+    fn add(&mut self, ptr: NonNull<CcBox<()>>) {
+        self.add(ptr)
+    }
+
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>) {
+        self.remove(ptr)
+    }
+
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>> {
+        self.remove_first()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn iter(&self) -> Iter {
+        self.iter()
+    }
+
+    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
+        self.iter().any(|elem| elem == ptr)
+    }
+
     fn assert_size(&self, expected_size: usize) {
-        if let Some(counted_list) = (self as &dyn Any).downcast_ref::<CountedList>() {
-            assert_eq!(expected_size, counted_list.size());
-        }
+        assert_eq!(expected_size, self.iter().count());
+    }
+}
+
+impl ListMethods for PossibleCycles {
+    fn first(&self) -> Option<NonNull<CcBox<()>>> {
+        self.first()
+    }
+
+    fn add(&mut self, ptr: NonNull<CcBox<()>>) {
+        Self::add(self, ptr)
+    }
+
+    fn remove(&mut self, ptr: NonNull<CcBox<()>>) {
+        Self::remove(self, ptr)
+    }
+
+    fn remove_first(&mut self) -> Option<NonNull<CcBox<()>>> {
+        Self::remove_first(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn iter(&self) -> Iter {
+        self.iter()
+    }
+
+    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
+        self.contains(ptr)
+    }
+
+    fn assert_size(&self, expected_size: usize) {
+        assert_eq!(expected_size, self.size());
     }
 }

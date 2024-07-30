@@ -191,8 +191,8 @@ fn test_trait_object() {
         let inner = cc.deref();
         inner.hello();
 
-        let mut l1 = List::new();
-        let mut l2 = List::new();
+        let mut l1 = LinkedList::new();
+        let mut l2 = LinkedList::new();
 
         cc.trace(&mut Context::new(ContextInner::Counting {
             root_list: &mut l1,

@@ -1,7 +1,6 @@
-use std::cell::Cell;
 use std::panic::catch_unwind;
 use crate::*;
-use super::reset_state;
+use super::*;
 use crate::weak::Weak;
 
 #[test]

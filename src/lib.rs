@@ -144,7 +144,6 @@ compile_error!("Feature \"std\" cannot be disabled without enabling feature \"ni
 
 extern crate alloc;
 
-use core::cell::RefCell;
 use core::mem;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
@@ -186,7 +185,7 @@ pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 
 rust_cc_thread_local! {
-    pub(crate) static POSSIBLE_CYCLES: RefCell<CountedList> = RefCell::new(CountedList::new());
+    pub(crate) static POSSIBLE_CYCLES: PossibleCycles = PossibleCycles::new();
 }
 
 /// Immediately executes the cycle collection algorithm and collects garbage cycles.
@@ -228,7 +227,7 @@ fn adjust_trigger_point(state: &State) {
     let _ = config::config(|config| config.adjust(state));
 }
 
-fn collect(state: &State, possible_cycles: &RefCell<CountedList>) {
+fn collect(state: &State, possible_cycles: &PossibleCycles) {
     state.set_collecting(true);
     state.increment_executions_count();
 
@@ -264,26 +263,26 @@ fn collect(state: &State, possible_cycles: &RefCell<CountedList>) {
         // Thus, it is fine to just leave the remaining objects into POSSIBLE_CYCLES for the
         // next collection execution. The program has already been stopped for too much time.
 
-        if is_empty(possible_cycles) {
+        if possible_cycles.is_empty() {
             break;
         }
 
         __collect(state, possible_cycles);
     }
     #[cfg(not(feature = "finalization"))]
-    if !is_empty(possible_cycles) {
+    if !possible_cycles.is_empty() {
         __collect(state, possible_cycles);
     }
 
     // _drop_guard is dropped here, setting state.collecting to false
 }
 
-fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
-    let mut non_root_list = List::new();
+fn __collect(state: &State, possible_cycles: &PossibleCycles) {
+    let mut non_root_list = LinkedList::new();
     {
-        let mut root_list = List::new();
+        let mut root_list = LinkedList::new();
 
-        while let Some(ptr) = get_and_remove_first(possible_cycles) {
+        while let Some(ptr) = possible_cycles.remove_first() {
             // remove_first already marks ptr as NonMarked
             trace_counting(ptr, &mut root_list, &mut non_root_list);
         }
@@ -322,29 +321,25 @@ fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
                 deallocate_list(non_root_list, state);
             } else {
                 // Put CcBoxes back into the possible cycles list. They will be re-processed in the
-                // next iteration of the loop, which will automatically check for resurrected objects
-                // using the same algorithm of the initial tracing. This makes it more difficult to
-                // create memory leaks accidentally using finalizers than in the previous implementation.
-                let mut pc = possible_cycles.borrow_mut();
+                // next iteration of the loop, which will automatically check for resurrected objects.
 
-                // pc is already marked PossibleCycles, while non_root_list is not.
-                // non_root_list have to be added to pc after having been marked.
-                // It's good here to instead swap the two, mark the pc list (was non_root_list before) and then
-                // append the other to it in O(1), since we already know the last element of pc from the marking.
-                // This avoids iterating unnecessarily both lists and the need to update many pointers.
+                let old_size = possible_cycles.size();
 
-                let old_size = pc.size();
+                // possible_cycles is already marked PossibleCycles, while non_root_list is not.
+                // non_root_list have to be added to possible_cycles after having been marked.
+                // It's good here to instead swap the two, mark the possible_cycles list (was non_root_list before)
+                // and then append the other to it in O(1), since we already know the last element of pc from the
+                // marking. This avoids iterating unnecessarily both lists and the need to update many pointers.
 
-                // SAFETY: non_root_list_size is calculated before and it's the size of non_root_list
+                // SAFETY: non_root_list_size was calculated before and it's the size of non_root_list
                 unsafe {
-                    pc.swap_list(&mut non_root_list, non_root_list_size);
+                    possible_cycles.swap_list(&mut non_root_list, non_root_list_size);
                 }
                 // SAFETY: swap_list swapped pc and non_root_list, so every element inside non_root_list is already
                 //         marked PossibleCycles (because it was pc) and now old_size is the size of non_root_list
                 unsafe {
-                    pc.mark_self_and_append(Mark::PossibleCycles, non_root_list, old_size);
+                    possible_cycles.mark_self_and_append(Mark::PossibleCycles, non_root_list, old_size);
                 }
-                drop(pc); // Useless, but better be explicit here in case more code is added below this line
             }
         }
 
@@ -356,25 +351,15 @@ fn __collect(state: &State, possible_cycles: &RefCell<CountedList>) {
 }
 
 #[inline]
-fn is_empty(list: &RefCell<CountedList>) -> bool {
-    list.borrow().is_empty()
-}
-
-#[inline]
-fn get_and_remove_first(list: &RefCell<CountedList>) -> Option<NonNull<CcBox<()>>> {
-    list.borrow_mut().remove_first()
-}
-
-#[inline]
-fn deallocate_list(to_deallocate_list: List, state: &State) {
+fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
     /// Just a wrapper used to handle the dropping of to_deallocate_list.
     /// When dropped, the objects inside are set as dropped
     struct ToDropList {
-        list: ManuallyDrop<List>,
+        list: ManuallyDrop<LinkedList>,
     }
 
     impl Deref for ToDropList {
-        type Target = List;
+        type Target = LinkedList;
 
         #[inline(always)]
         fn deref(&self) -> &Self::Target {
@@ -455,8 +440,8 @@ fn deallocate_list(to_deallocate_list: List, state: &State) {
 
 fn trace_counting(
     ptr: NonNull<CcBox<()>>,
-    root_list: &mut List,
-    non_root_list: &mut List,
+    root_list: &mut LinkedList,
+    non_root_list: &mut LinkedList,
 ) {
     let mut ctx = Context::new(ContextInner::Counting {
         root_list,
@@ -466,7 +451,7 @@ fn trace_counting(
     CcBox::start_tracing(ptr, &mut ctx);
 }
 
-fn trace_roots(mut root_list: List, non_root_list: &mut List) {
+fn trace_roots(mut root_list: LinkedList, non_root_list: &mut LinkedList) {
     while let Some(ptr) = root_list.remove_first() {
         let mut ctx = Context::new(ContextInner::RootTracing { non_root_list, root_list: &mut root_list });
         CcBox::start_tracing(ptr, &mut ctx);

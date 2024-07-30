@@ -26,8 +26,7 @@ use core::num::NonZeroUsize;
 use core::marker::PhantomData;
 
 use thiserror::Error;
-use crate::lists::CountedList;
-
+use crate::lists::PossibleCycles;
 use crate::state::State;
 use crate::utils;
 
@@ -159,7 +158,7 @@ impl Config {
     }
 
     #[inline(always)]
-    pub(super) fn should_collect(&mut self, state: &State, possible_cycles: &RefCell<CountedList>) -> bool {
+    pub(super) fn should_collect(&mut self, state: &State, possible_cycles: &PossibleCycles) -> bool {
         if !self.auto_collect {
             return false;
         }
@@ -168,8 +167,8 @@ impl Config {
             return true;
         }
 
-        return if let Some(buffered_threshold) = self.buffered_threshold {
-            possible_cycles.try_borrow().map_or(false, |pc| pc.size() > buffered_threshold.get())
+        if let Some(buffered_threshold) = self.buffered_threshold {
+            possible_cycles.size() > buffered_threshold.get()
         } else {
             false
         }

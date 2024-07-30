@@ -21,7 +21,7 @@ use std::{
     ffi::{OsStr, OsString}
 };
 
-use crate::List;
+use crate::lists::LinkedList;
 
 /// Trait to finalize objects before freeing them.
 ///
@@ -138,12 +138,12 @@ pub struct Context<'a> {
 
 pub(crate) enum ContextInner<'a> {
     Counting {
-        root_list: &'a mut List,
-        non_root_list: &'a mut List,
+        root_list: &'a mut LinkedList,
+        non_root_list: &'a mut LinkedList,
     },
     RootTracing {
-        root_list: &'a mut List,
-        non_root_list: &'a mut List,
+        root_list: &'a mut LinkedList,
+        non_root_list: &'a mut LinkedList,
     },
 }
 

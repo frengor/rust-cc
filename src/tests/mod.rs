@@ -1,17 +1,16 @@
 #![cfg(test)]
 
 use std::rc::Rc;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ops::{Deref, DerefMut};
 
 use crate::trace::Trace;
-use crate::lists::*;
 use crate::{state, Cc, Context, Finalize, POSSIBLE_CYCLES};
 use crate::state::state;
 
 mod bench_code;
 mod cc;
-mod list;
+mod lists;
 mod panicking;
 mod counter_marker;
 
@@ -22,9 +21,7 @@ mod weak;
 mod cleaners;
 
 pub(crate) fn reset_state() {
-    POSSIBLE_CYCLES.with(|pc| {
-        pc.replace(CountedList::new());
-    });
+    POSSIBLE_CYCLES.with(|pc| pc.reset());
     state::reset_state();
 
     #[cfg(feature = "auto-collect")]
@@ -126,8 +123,7 @@ impl DropChecker {
 }
 
 pub(crate) fn assert_empty() {
-    let list = POSSIBLE_CYCLES.with(|pc| pc.borrow().first());
-    assert!(list.is_none());
+    assert!(POSSIBLE_CYCLES.with(|pc| pc.is_empty()));
 }
 
 pub(crate) fn assert_collecting() {

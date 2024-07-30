@@ -21,7 +21,6 @@ use core::{
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
-use crate::lists::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptrs")]
@@ -507,13 +506,12 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
     if counter_marker.is_in_possible_cycles() {
         // ptr is in the list, remove it
         let _ = POSSIBLE_CYCLES.try_with(|pc| {
-            let mut list = pc.borrow_mut();
             // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(list.contains(ptr));
+            debug_assert!(pc.contains(ptr));
 
             counter_marker.mark(Mark::NonMarked);
-            list.remove(ptr);
+            pc.remove(ptr);
         });
     } else {
         // ptr is not in the list
@@ -523,7 +521,7 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
         #[cfg(feature = "pedantic-debug-assertions")]
         debug_assert! {
             POSSIBLE_CYCLES.try_with(|pc| {
-                !pc.borrow().contains(ptr)
+                !pc.contains(ptr)
             }).unwrap_or(true)
         };
     }
@@ -534,20 +532,19 @@ pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
-        let mut list = pc.borrow_mut();
-
         // Check if ptr is in possible_cycles list since we have to move it at its start
         if counter_marker.is_in_possible_cycles() {
             // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(list.contains(ptr));
+            debug_assert!(pc.contains(ptr));
 
-            list.remove(ptr);
+            pc.remove(ptr);
             // In this case we don't need to update the mark since we put it back into the list
         } else {
             // Confirm !is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(!list.contains(ptr));
+            debug_assert!(!pc.contains(ptr));
+
             debug_assert!(counter_marker.is_not_marked());
 
             // Mark it
@@ -557,7 +554,7 @@ pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
         //
         // Make sure this operation is the first after the if-else, since the CcBox is in
         // an invalid state now (it's marked Mark::PossibleCycles, but it isn't into the list)
-        list.add(ptr);
+        pc.add(ptr);
     });
 }
 
