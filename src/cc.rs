@@ -814,7 +814,7 @@ impl<T: ?Sized + Trace> InternalTrace for CcBox<T> {
 // #          Cc Trait impls          #
 // ####################################
 
-impl<T: ?Sized + Trace + Default> Default for Cc<T> {
+impl<T: Trace + Default> Default for Cc<T> {
     /// Creates a new [`Cc<T>`][`Cc`], with the [`Default`] value for `T`.
     ///
     /// # Collection
