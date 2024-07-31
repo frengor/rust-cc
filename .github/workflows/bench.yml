@@ -25,7 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@valgrind
       - uses: taiki-e/install-action@cargo-binstall
-      - name: Install iai-callgrind-runner
+      - name: Install iai-callgrind-runner for base branch
         run: |
           version=$(cargo metadata --format-version=1 |\
             jq '.packages[] | select(.name == "iai-callgrind").version' |\
@@ -40,6 +40,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           clean: false
+      - name: Install iai-callgrind-runner for head branch
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version "${version}"
       - name: Bench head branch
         run: |
           cargo update
@@ -48,6 +55,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           clean: false
+      - name: Install iai-callgrind-runner for base branch no finalization
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version "${version}"
       - name: Bench base branch no finalization
         run: |
           cargo clean
@@ -57,6 +71,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           clean: false
+      - name: Install iai-callgrind-runner for head branch no finalization
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version "${version}"
       - name: Bench head branch no finalization
         run: |
           cargo update
