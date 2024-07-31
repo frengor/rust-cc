@@ -54,7 +54,7 @@ slotmap = {  version = "1.0", optional = true }
 thiserror = { version = "1.0", package = "thiserror-core", default-features = false }
 
 [dev-dependencies]
-iai-callgrind = "=0.7.3" # Also update IAI_CALLGRIND_VERSION in .github/workflows/bench.yml
+iai-callgrind = "=0.12.2"
 rand = "0.8.3"
 trybuild = "1.0.85"
 test-case = "3.3.1"
@@ -63,6 +63,10 @@ test-case = "3.3.1"
 name = "bench"
 harness = false
 required-features = ["std", "derive"]
+
+[profile.bench]
+debug = true # Required by iai-callgrind
+strip = false # Required by iai-callgrind
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_auto_cfg)'] }

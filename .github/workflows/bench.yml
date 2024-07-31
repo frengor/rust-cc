@@ -5,7 +5,6 @@ on:
     types: [labeled]
 
 env:
-  IAI_CALLGRIND_VERSION: 0.7.3
   CARGO_TERM_COLOR: always
   IAI_CALLGRIND_COLOR: never
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
@@ -27,7 +26,12 @@ jobs:
       - uses: taiki-e/install-action@valgrind
       - uses: taiki-e/install-action@cargo-binstall
       - name: Install iai-callgrind-runner
-        run: cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version ${IAI_CALLGRIND_VERSION}
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version "${version}"
       - name: Bench base branch
         run: |
           cargo update
