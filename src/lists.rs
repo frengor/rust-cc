@@ -366,6 +366,93 @@ impl<'a> IntoIterator for &'a PossibleCycles {
     }
 }
 
+#[allow(dead_code)] // TODO Remove when actually used
+pub(crate) struct LinkedQueue {
+    first: Option<NonNull<CcBox<()>>>,
+    last: Option<NonNull<CcBox<()>>>,
+}
+
+#[allow(dead_code)] // TODO Remove when actually used
+impl LinkedQueue {
+    #[inline]
+    pub(crate) const fn new() -> Self {
+        Self {
+            first: None,
+            last: None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn add(&mut self, ptr: NonNull<CcBox<()>>) {
+        debug_assert_nones(ptr);
+
+        if let Some(last) = self.last {
+            unsafe {
+                *last.as_ref().get_next() = Some(ptr);
+            }
+        } else {
+            self.first = Some(ptr);
+        }
+
+        self.last = Some(ptr);
+    }
+
+    #[inline]
+    pub(crate) fn peek(&self) -> Option<NonNull<CcBox<()>>> {
+        self.first
+    }
+
+    #[inline]
+    pub(crate) fn poll(&mut self) -> Option<NonNull<CcBox<()>>> {
+        match self.first {
+            Some(first) => unsafe {
+                self.first = *first.as_ref().get_next();
+                if self.first.is_none() {
+                    // The last element is being removed
+                    self.last = None;
+                }
+                *first.as_ref().get_next() = None;
+
+                // Make sure the mark is correct
+                first.as_ref().counter_marker().mark(Mark::NonMarked);
+
+                Some(first)
+            },
+            None => {
+                None
+            },
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.peek().is_none()
+    }
+}
+
+impl Drop for LinkedQueue {
+    #[inline]
+    fn drop(&mut self) {
+        // Remove the remaining elements from the queue
+        while self.poll().is_some() {
+            // poll() already marks every removed element NonMarked
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a LinkedQueue {
+    type Item = NonNull<CcBox<()>>;
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            next: self.first,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 #[inline(always)] // The fn is always empty in release mode
 fn debug_assert_nones(ptr: NonNull<CcBox<()>>) {
     unsafe {
