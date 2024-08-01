@@ -143,7 +143,7 @@ fn test_remove_first(mut list: impl ListMethods) {
 
     // Mark to test the removal of the mark
     list.iter().for_each(|ptr| unsafe {
-        ptr.as_ref().counter_marker().mark(Mark::Traced)
+        ptr.as_ref().counter_marker().mark(Mark::InList)
     });
 
     // Iterate over the list to get the elements in the correct order as in the list
@@ -248,7 +248,7 @@ fn test_mark_self_and_append() {
     let vec_to_append = new_collection(&elements_to_append, &mut to_append);
 
     let list_size = list.iter().inspect(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::Traced);
+        elem.as_ref().counter_marker().mark(Mark::InList);
     }).count();
     let to_append_size = to_append.iter().inspect(|elem| unsafe {
         elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
@@ -281,7 +281,7 @@ fn test_mark_self_and_append_empty_list() {
     let vec = new_collection(&elements, &mut list);
 
     list.iter().for_each(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::Traced);
+        elem.as_ref().counter_marker().mark(Mark::InList);
     });
 
     unsafe {
@@ -559,7 +559,7 @@ mod queue {
 
         // Mark to test the removal of the mark
         queue.into_iter().for_each(|ptr| unsafe {
-            ptr.as_ref().counter_marker().mark(Mark::Traced)
+            ptr.as_ref().counter_marker().mark(Mark::InList)
         });
 
         for elem in vec {
@@ -603,7 +603,7 @@ mod queue {
 
         // Mark to test the removal of the mark
         queue.into_iter().for_each(|ptr| unsafe {
-            ptr.as_ref().counter_marker().mark(Mark::Traced)
+            ptr.as_ref().counter_marker().mark(Mark::InList)
         });
 
         drop(queue);

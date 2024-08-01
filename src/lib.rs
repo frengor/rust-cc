@@ -299,7 +299,7 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
                 counter_marker.tracing_counter(),
                 counter_marker.counter()
             );
-            debug_assert!(counter_marker.is_traced());
+            debug_assert!(counter_marker.is_in_list());
         });
 
         #[cfg(feature = "finalization")]
@@ -382,7 +382,7 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
             #[cfg(feature = "weak-ptrs")]
             while let Some(ptr) = self.list.remove_first() {
                 // Always set the mark, since it has been cleared by remove_first
-                unsafe { ptr.as_ref() }.counter_marker().mark(Mark::Dropped);
+                unsafe { ptr.as_ref() }.counter_marker().set_dropped(true);
             }
 
             // If not using weak pointers, just call the list's drop implementation
@@ -404,7 +404,7 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
     to_deallocate_list.iter().for_each(|ptr| {
         // SAFETY: ptr is valid to access and drop in place
         unsafe {
-            debug_assert!(ptr.as_ref().counter_marker().is_traced());
+            debug_assert!(ptr.as_ref().counter_marker().is_in_list());
 
             #[cfg(feature = "weak-ptrs")]
             ptr.as_ref().drop_metadata();

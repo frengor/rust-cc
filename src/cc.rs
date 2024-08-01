@@ -86,7 +86,7 @@ impl<T: Trace> Cc<T> {
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            !self.counter_marker().is_traced(),
+            !self.counter_marker().is_in_list_or_queue(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
@@ -259,10 +259,9 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
             add_to_list(cc.inner.cast());
         }
 
-        // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
+        // A CcBox can be in list or queue only during collections while being into a list different than POSSIBLE_CYCLES.
         // In this case, no further action has to be taken, except decrementing the reference counter.
-        // Skip the rest of the code also when the value has already been dropped
-        if self.counter_marker().is_traced_or_dropped() {
+        if self.counter_marker().is_in_list_or_queue() {
             decrement_counter(self);
             return;
         }
@@ -298,7 +297,7 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
                 {
                     // Set the object as dropped before dropping and deallocating it
                     // This feature is used only in weak pointers, so do this only if they're enabled
-                    self.counter_marker().mark(Mark::Dropped);
+                    self.counter_marker().set_dropped(true);
 
                     self.inner().drop_metadata();
                 }
@@ -590,7 +589,7 @@ impl CcBox<()> {
         {
             // Set the object as dropped before dropping it
             // This feature is used only in weak pointers, so do this only if they're enabled
-            ptr.as_ref().counter_marker().mark(Mark::Dropped);
+            ptr.as_ref().counter_marker().set_dropped(true);
         }
 
         CcBox::get_traceable(ptr).as_mut().drop_elem();
@@ -623,7 +622,7 @@ impl CcBox<()> {
                 counter_marker.reset_tracing_counter();
 
                 // Element is surely not already marked, marking
-                counter_marker.mark(Mark::Traced);
+                counter_marker.mark(Mark::InList);
             },
             ContextInner::RootTracing { .. } => {
                 // ptr is a root
@@ -659,7 +658,7 @@ impl CcBox<()> {
                 root_list,
                 non_root_list,
             } => {
-                if !counter_marker.is_traced() {
+                if !counter_marker.is_in_list() {
                     // Not already marked
 
                     // Make sure ptr is not in POSSIBLE_CYCLES list
@@ -680,7 +679,7 @@ impl CcBox<()> {
 
                     // Marking here since the previous debug_asserts might panic
                     // before ptr is actually added to root_list or non_root_list
-                    counter_marker.mark(Mark::Traced);
+                    counter_marker.mark(Mark::InList);
 
                     // Continue tracing
                     true
@@ -703,7 +702,7 @@ impl CcBox<()> {
                 }
             },
             ContextInner::RootTracing { non_root_list, root_list } => {
-                if counter_marker.is_traced() {
+                if counter_marker.is_in_list() {
                     // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
                     // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
                     counter_marker.mark(Mark::NonMarked);
