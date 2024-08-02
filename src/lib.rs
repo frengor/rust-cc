@@ -131,7 +131,7 @@ cleanable.clean();
 //! [`Sync`]: `std::marker::Sync`
 //! [`Rc`]: `std::rc::Rc`
 
-#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata))]
+#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata, derive_smart_pointer))]
 #![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(thread_local))] // no-std related unstable features
 #![cfg_attr(doc_auto_cfg, feature(doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
