@@ -143,6 +143,14 @@ pub(crate) struct Iter<'a> {
     _phantom: PhantomData<&'a CcBox<()>>,
 }
 
+impl Iter<'_> {
+    #[inline]
+    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
+    pub(crate) fn contains(mut self, ptr: NonNull<CcBox<()>>) -> bool {
+        self.any(|elem| elem == ptr)
+    }
+}
+
 impl<'a> Iterator for Iter<'a> {
     type Item = NonNull<CcBox<()>>;
 
@@ -290,12 +298,6 @@ impl PossibleCycles {
         self.first().is_none()
     }
 
-    #[inline]
-    #[cfg(any(feature = "pedantic-debug-assertions", all(test, feature = "std")))] // Only used in pedantic-debug-assertions or unit tests
-    pub(crate) fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
-        self.iter().any(|elem| elem == ptr)
-    }
-
     /// # Safety
     /// * The elements in `to_append` must be already marked with `mark` mark
     /// * `to_append_size` must be the size of `to_append`
@@ -366,13 +368,11 @@ impl<'a> IntoIterator for &'a PossibleCycles {
     }
 }
 
-#[allow(dead_code)] // TODO Remove when actually used
 pub(crate) struct LinkedQueue {
     first: Option<NonNull<CcBox<()>>>,
     last: Option<NonNull<CcBox<()>>>,
 }
 
-#[allow(dead_code)] // TODO Remove when actually used
 impl LinkedQueue {
     #[inline]
     pub(crate) const fn new() -> Self {

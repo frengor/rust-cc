@@ -4,7 +4,7 @@ fn assert_not_marked(counter: &CounterMarker) {
     assert!(counter.is_not_marked());
     assert!(!counter.is_in_possible_cycles());
     assert!(!counter.is_in_list());
-    assert!(!counter.is_in_queue());
+    assert!(!counter._is_in_queue());
     assert!(!counter.is_in_list_or_queue());
     assert!(!counter.is_in_list_or_queue());
 }
@@ -225,7 +225,7 @@ fn test_marks() {
         assert!(counter.is_not_marked());
         assert!(counter.is_in_possible_cycles());
         assert!(!counter.is_in_list());
-        assert!(!counter.is_in_queue());
+        assert!(!counter._is_in_queue());
         assert!(!counter.is_in_list_or_queue());
         assert_default_settings(&counter);
 
@@ -234,7 +234,7 @@ fn test_marks() {
         assert!(!counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(counter.is_in_list());
-        assert!(!counter.is_in_queue());
+        assert!(!counter._is_in_queue());
         assert!(counter.is_in_list_or_queue());
         assert_default_settings(&counter);
 
@@ -243,7 +243,7 @@ fn test_marks() {
         assert!(!counter.is_not_marked());
         assert!(!counter.is_in_possible_cycles());
         assert!(!counter.is_in_list());
-        assert!(counter.is_in_queue());
+        assert!(counter._is_in_queue());
         assert!(counter.is_in_list_or_queue());
         assert_default_settings(&counter);
 

@@ -5,7 +5,6 @@ use crate::utils;
 const NON_MARKED: u32 = 0u32;
 const IN_POSSIBLE_CYCLES: u32 = 1u32 << (u32::BITS - 2);
 const IN_LIST: u32 = 2u32 << (u32::BITS - 2);
-#[allow(dead_code)] // TODO Remove when actually used
 const IN_QUEUE: u32 = 3u32 << (u32::BITS - 2);
 
 const COUNTER_MASK: u32 = 0b11111111111111u32; // First 14 bits set to 1
@@ -187,9 +186,8 @@ impl CounterMarker {
         (self.counter.get() & BITS_MASK) == IN_LIST
     }
 
-    #[allow(dead_code)] // TODO Remove when actually used
     #[inline]
-    pub(crate) fn is_in_queue(&self) -> bool {
+    pub(crate) fn _is_in_queue(&self) -> bool {
         (self.counter.get() & BITS_MASK) == IN_QUEUE
     }
 
@@ -222,6 +220,5 @@ pub(crate) enum Mark {
     NonMarked = NON_MARKED,
     PossibleCycles = IN_POSSIBLE_CYCLES,
     InList = IN_LIST,
-    #[allow(dead_code)] // TODO Remove when actually used
     InQueue = IN_QUEUE,
 }

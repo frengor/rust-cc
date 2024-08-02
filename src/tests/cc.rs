@@ -145,11 +145,12 @@ fn test_trait_object() {
         static TRACED: Cell<bool> = Cell::new(false);
     }
 
-    struct MyTraitObject(u8);
+    struct MyTraitObject(u8, RefCell<Option<Cc<Self>>>);
 
     unsafe impl Trace for MyTraitObject {
         fn trace(&self, ctx: &mut Context<'_>) {
             self.0.trace(ctx);
+            self.1.trace(ctx);
             TRACED.with(|traced| traced.set(true));
         }
     }
@@ -177,27 +178,25 @@ fn test_trait_object() {
     }
 
     {
-        let cc = Cc::new(MyTraitObject(5)) as Cc<dyn TestTrait>;
+        let cc = Cc::new(MyTraitObject(5, RefCell::new(None)));
+        *cc.1.borrow_mut() = Some(cc.clone());
 
-        assert_eq!(cc.strong_count(), 1);
+        let cc: Cc<dyn TestTrait> = cc;
 
-        let cc_cloned = cc.clone();
-        assert_eq!(cc_cloned.strong_count(), 2);
         assert_eq!(cc.strong_count(), 2);
 
+        let cc_cloned = cc.clone();
+        assert_eq!(cc_cloned.strong_count(), 3);
+        assert_eq!(cc.strong_count(), 3);
+
         drop(cc_cloned);
-        assert_eq!(cc.strong_count(), 1);
+        assert_eq!(cc.strong_count(), 2);
 
         let inner = cc.deref();
         inner.hello();
 
-        let mut l1 = LinkedList::new();
-        let mut l2 = LinkedList::new();
-
-        cc.trace(&mut Context::new(ContextInner::Counting {
-            root_list: &mut l1,
-            non_root_list: &mut l2,
-        }));
+        drop(cc);
+        collect_cycles();
     }
 
     assert!(
@@ -216,7 +215,7 @@ fn test_trait_object() {
     #[cfg(feature = "finalization")]
     assert!(
         FINALIZED.with(|dropped| dropped.get()),
-        "MyTraitObject hasn't been traced"
+        "MyTraitObject hasn't been finalized"
     );
 }
 

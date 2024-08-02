@@ -13,7 +13,7 @@ use crate::utils::cc_dealloc;
 fn assert_contains(list: &impl ListMethods, mut elements: Vec<i32>) {
     list.iter().for_each(|ptr| {
         // Test contains
-        assert!(list.contains(ptr));
+        assert!(list.iter().contains(ptr));
 
         let elem = unsafe { *ptr.cast::<CcBox<i32>>().as_ref().get_elem() };
         let index = elements.iter().position(|&i| i == elem);
@@ -389,8 +389,6 @@ trait ListMethods: CommonMethods {
 
     fn iter(&self) -> Iter;
 
-    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool;
-
     fn assert_size(&self, expected_size: usize);
 }
 
@@ -419,10 +417,6 @@ impl ListMethods for LinkedList {
 
     fn iter(&self) -> Iter {
         self.iter()
-    }
-
-    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
-        self.iter().any(|elem| elem == ptr)
     }
 
     fn assert_size(&self, expected_size: usize) {
@@ -457,10 +451,6 @@ impl ListMethods for PossibleCycles {
         self.iter()
     }
 
-    fn contains(&self, ptr: NonNull<CcBox<()>>) -> bool {
-        self.contains(ptr)
-    }
-
     fn assert_size(&self, expected_size: usize) {
         assert_eq!(expected_size, self.size());
     }
@@ -490,7 +480,7 @@ mod queue {
     fn assert_queue_contains(queue: &LinkedQueue, mut elements: Vec<i32>) {
         queue.into_iter().for_each(|ptr| {
             // Test contains
-            assert!(queue.into_iter().any(|elem| elem == ptr));
+            assert!(queue.into_iter().contains(ptr));
 
             let elem = unsafe { *ptr.cast::<CcBox<i32>>().as_ref().get_elem() };
             let index = elements.iter().position(|&i| i == elem);

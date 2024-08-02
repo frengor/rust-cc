@@ -281,13 +281,10 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
     let mut non_root_list = LinkedList::new();
     {
         let mut root_list = LinkedList::new();
+        let mut queue = LinkedQueue::new();
 
-        while let Some(ptr) = possible_cycles.remove_first() {
-            // remove_first already marks ptr as NonMarked
-            trace_counting(ptr, &mut root_list, &mut non_root_list);
-        }
-
-        trace_roots(root_list, &mut non_root_list);
+        trace_counting(possible_cycles, &mut root_list, &mut non_root_list, &mut queue);
+        trace_roots(root_list, &mut non_root_list, queue);
     }
 
     if !non_root_list.is_empty() {
@@ -439,23 +436,88 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
 }
 
 fn trace_counting(
-    ptr: NonNull<CcBox<()>>,
+    possible_cycles: &PossibleCycles,
     root_list: &mut LinkedList,
     non_root_list: &mut LinkedList,
+    queue: &mut LinkedQueue,
 ) {
-    let mut ctx = Context::new(ContextInner::Counting {
-        root_list,
-        non_root_list,
-    });
-
-    CcBox::start_tracing(ptr, &mut ctx);
-}
-
-fn trace_roots(mut root_list: LinkedList, non_root_list: &mut LinkedList) {
-    while let Some(ptr) = root_list.remove_first() {
-        let mut ctx = Context::new(ContextInner::RootTracing { non_root_list, root_list: &mut root_list });
-        CcBox::start_tracing(ptr, &mut ctx);
+    while let Some(ptr) = possible_cycles.remove_first() {
+        // Reset the tracing counter before tracing
+        unsafe { ptr.as_ref() }.counter_marker().reset_tracing_counter();
+        __trace_counting(ptr, possible_cycles, root_list, non_root_list, queue);
     }
 
-    mem::forget(root_list); // root_list is empty, no need run List::drop
+    while let Some(ptr) = queue.poll() {
+        // The tracing counter has already been reset by CcBox::trace when ptr was inserted into the queue
+        __trace_counting(ptr, possible_cycles, root_list, non_root_list, queue);
+    }
+
+    debug_assert!(possible_cycles.is_empty());
+    debug_assert!(queue.is_empty());
+}
+
+fn __trace_counting(
+    ptr: NonNull<CcBox<()>>,
+    possible_cycles: &PossibleCycles,
+    root_list: &mut LinkedList,
+    non_root_list: &mut LinkedList,
+    queue: &mut LinkedQueue,
+) {
+    let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
+
+    // Mark as InQueue so that CcBox::trace will only increment the tracing counter
+    counter_marker.mark(Mark::InQueue);
+
+    // Reset the mark if a panic happens during tracing
+    let drop_guard = ResetMarkDropGuard::new(ptr);
+
+    let mut ctx = Context::new(ContextInner::Counting {
+        possible_cycles,
+        root_list,
+        non_root_list,
+        queue,
+    });
+    CcBox::trace_inner(ptr, &mut ctx);
+
+    if counter_marker.counter() == counter_marker.tracing_counter() {
+        non_root_list.add(ptr);
+    } else {
+        root_list.add(ptr);
+    }
+
+    mem::forget(drop_guard);
+    counter_marker.mark(Mark::InList);
+}
+
+fn trace_roots(
+    mut root_list: LinkedList,
+    non_root_list: &mut LinkedList,
+    mut queue: LinkedQueue,
+) {
+    while let Some(ptr) = root_list.remove_first() {
+        __trace_roots(ptr, non_root_list, &mut queue);
+    }
+
+    while let Some(ptr) = queue.poll() {
+        __trace_roots(ptr, non_root_list, &mut queue);
+    }
+
+    debug_assert!(queue.is_empty());
+    debug_assert!(root_list.is_empty());
+
+    mem::forget(root_list); // No need to run its destructor, it's already empty
+    mem::forget(queue); // No need to run its destructor, it's already empty
+}
+
+fn __trace_roots(
+    ptr: NonNull<CcBox<()>>,
+    non_root_list: &mut LinkedList,
+    queue: &mut LinkedQueue,
+) {
+    let mut ctx = Context::new(ContextInner::RootTracing {
+        non_root_list,
+        queue,
+    });
+
+    CcBox::trace_inner(ptr, &mut ctx);
 }
