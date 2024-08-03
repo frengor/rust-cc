@@ -7,6 +7,7 @@ use core::num::{
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
 use core::panic::AssertUnwindSafe;
+use core::ptr::NonNull;
 use core::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
     AtomicU64, AtomicU8, AtomicUsize,
@@ -21,6 +22,7 @@ use std::{
     ffi::{OsStr, OsString}
 };
 
+use crate::cc::CcBox;
 use crate::lists::{LinkedList, LinkedQueue, PossibleCycles};
 
 /// Trait to finalize objects before freeing them.
@@ -132,40 +134,12 @@ pub unsafe trait Trace: Finalize {
 
 /// The tracing context provided to every invocation of [`Trace::trace`].
 pub struct Context<'a> {
-    inner: ContextInner<'a>,
-    _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
-}
-
-pub(crate) enum ContextInner<'a> {
-    Counting {
-        possible_cycles: &'a PossibleCycles,
-        root_list: &'a mut LinkedList,
-        non_root_list: &'a mut LinkedList,
-        queue: &'a mut LinkedQueue,
-    },
-    RootTracing {
-        non_root_list: &'a mut LinkedList,
-        queue: &'a mut LinkedQueue,
-    },
-}
-
-impl<'b> Context<'b> {
-    #[inline]
-    #[must_use]
-    pub(crate) const fn new(ctxi: ContextInner) -> Context {
-        Context {
-            inner: ctxi,
-            _phantom: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub(crate) fn inner<'a>(&'a mut self) -> &'a mut ContextInner<'b>
-        where
-        'b: 'a,
-    {
-        &mut self.inner
-    }
+    pub(crate) action: fn(NonNull<CcBox<()>>, &mut Context<'_>),
+    pub(crate) possible_cycles: &'a PossibleCycles,
+    pub(crate) root_list: &'a mut LinkedList,
+    pub(crate) non_root_list: &'a mut LinkedList,
+    pub(crate) queue: &'a mut LinkedQueue,
+    pub(crate) _phantom: PhantomData<*mut ()>, // Make Context !Send and !Sync
 }
 
 // #################################

@@ -20,7 +20,7 @@ use core::{
 
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
-use crate::trace::{Context, ContextInner, Finalize, Trace};
+use crate::trace::{Context, Finalize, Trace};
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptrs")]
@@ -326,7 +326,7 @@ unsafe impl<T: ?Sized + Trace> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        CcBox::trace(self.inner.cast(), ctx);
+        (ctx.action)(self.inner.cast(), ctx);
     }
 }
 
@@ -599,60 +599,54 @@ impl CcBox<()> {
         }
     }
 
-    #[inline(never)] // Don't inline this function, it's huge
-    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+    pub(super) fn trace_counting(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
-        match ctx.inner() {
-            ContextInner::Counting {
-                possible_cycles,
-                root_list,
-                non_root_list,
-                queue,
-            } => {
-                if counter_marker.is_in_list_or_queue() {
-                    // Check counters invariant (tracing_counter is always less or equal to counter)
-                    // Only < is used here since tracing_counter will be incremented (by 1)
-                    debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
 
-                    let res = counter_marker.increment_tracing_counter();
-                    debug_assert!(res.is_ok());
+        if counter_marker.is_in_list_or_queue() {
+            // Check counters invariant (tracing_counter is always less or equal to counter)
+            // Only < is used here since tracing_counter will be incremented (by 1)
+            debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
 
-                    if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
-                        // ptr is in root_list
+            let res = counter_marker.increment_tracing_counter();
+            debug_assert!(res.is_ok());
 
-                        #[cfg(feature = "pedantic-debug-assertions")]
-                        debug_assert!(root_list.iter().contains(ptr));
+            if counter_marker.counter() == counter_marker.tracing_counter() && counter_marker.is_in_list() {
+                // ptr is in root_list
 
-                        root_list.remove(ptr);
-                        non_root_list.add(ptr);
-                    }
-                } else {
-                    if counter_marker.is_in_possible_cycles() {
-                        counter_marker.mark(Mark::NonMarked);
-                        possible_cycles.remove(ptr);
-                    }
+                #[cfg(feature = "pedantic-debug-assertions")]
+                debug_assert!(ctx.root_list.iter().contains(ptr));
 
-                    counter_marker.reset_tracing_counter();
-                    let res = counter_marker.increment_tracing_counter();
-                    debug_assert!(res.is_ok());
+                ctx.root_list.remove(ptr);
+                ctx.non_root_list.add(ptr);
+            }
+        } else {
+            if counter_marker.is_in_possible_cycles() {
+                counter_marker.mark(Mark::NonMarked);
+                ctx.possible_cycles.remove(ptr);
+            }
 
-                    queue.add(ptr);
-                    counter_marker.mark(Mark::InQueue);
-                }
-            },
-            ContextInner::RootTracing { non_root_list, queue } => {
-                if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
-                    // ptr is in non_root_list
+            counter_marker.reset_tracing_counter();
+            let res = counter_marker.increment_tracing_counter();
+            debug_assert!(res.is_ok());
 
-                    #[cfg(feature = "pedantic-debug-assertions")]
-                    debug_assert!(non_root_list.iter().contains(ptr));
+            ctx.queue.add(ptr);
+            counter_marker.mark(Mark::InQueue);
+        }
+    }
 
-                    counter_marker.mark(Mark::NonMarked);
-                    non_root_list.remove(ptr);
-                    queue.add(ptr);
-                    counter_marker.mark(Mark::InQueue);
-                }
-            },
+    pub(super) fn trace_roots(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
+        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
+
+        if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
+            // ptr is in non_root_list
+
+            #[cfg(feature = "pedantic-debug-assertions")]
+            debug_assert!(ctx.non_root_list.iter().contains(ptr));
+
+            counter_marker.mark(Mark::NonMarked);
+            ctx.non_root_list.remove(ptr);
+            ctx.queue.add(ptr);
+            counter_marker.mark(Mark::InQueue);
         }
     }
 }

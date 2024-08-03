@@ -148,12 +148,12 @@ use core::mem;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 use core::ops::{Deref, DerefMut};
+use core::marker::PhantomData;
 
 use crate::cc::CcBox;
 use crate::counter_marker::Mark;
 use crate::lists::*;
 use crate::state::{replace_state_field, State, try_state};
-use crate::trace::ContextInner;
 use crate::utils::*;
 
 #[cfg(all(test, feature = "std"))]
@@ -284,7 +284,7 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
         let mut queue = LinkedQueue::new();
 
         trace_counting(possible_cycles, &mut root_list, &mut non_root_list, &mut queue);
-        trace_roots(root_list, &mut non_root_list, queue);
+        trace_roots(possible_cycles, root_list, &mut non_root_list, queue);
     }
 
     if !non_root_list.is_empty() {
@@ -471,12 +471,14 @@ fn __trace_counting(
     // Reset the mark if a panic happens during tracing
     let drop_guard = ResetMarkDropGuard::new(ptr);
 
-    let mut ctx = Context::new(ContextInner::Counting {
+    let mut ctx = Context {
+        action: CcBox::trace_counting,
         possible_cycles,
         root_list,
         non_root_list,
         queue,
-    });
+        _phantom: PhantomData,
+    };
     CcBox::trace_inner(ptr, &mut ctx);
 
     if counter_marker.counter() == counter_marker.tracing_counter() {
@@ -490,16 +492,17 @@ fn __trace_counting(
 }
 
 fn trace_roots(
+    possible_cycles: &PossibleCycles,
     mut root_list: LinkedList,
     non_root_list: &mut LinkedList,
     mut queue: LinkedQueue,
 ) {
     while let Some(ptr) = root_list.remove_first() {
-        __trace_roots(ptr, non_root_list, &mut queue);
+        __trace_roots(ptr, possible_cycles, &mut root_list, non_root_list, &mut queue);
     }
 
     while let Some(ptr) = queue.poll() {
-        __trace_roots(ptr, non_root_list, &mut queue);
+        __trace_roots(ptr, possible_cycles, &mut root_list, non_root_list, &mut queue);
     }
 
     debug_assert!(queue.is_empty());
@@ -511,13 +514,19 @@ fn trace_roots(
 
 fn __trace_roots(
     ptr: NonNull<CcBox<()>>,
+    possible_cycles: &PossibleCycles,
+    root_list: &mut LinkedList,
     non_root_list: &mut LinkedList,
     queue: &mut LinkedQueue,
 ) {
-    let mut ctx = Context::new(ContextInner::RootTracing {
+    let mut ctx = Context {
+        action: CcBox::trace_roots,
+        possible_cycles,
+        root_list,
         non_root_list,
         queue,
-    });
+        _phantom: PhantomData,
+    };
 
     CcBox::trace_inner(ptr, &mut ctx);
 }
