@@ -534,6 +534,7 @@ pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
 
             debug_assert!(counter_marker.is_not_marked());
 
+            counter_marker.reset_tracing_counter();
             counter_marker.mark(Mark::PossibleCycles);
         }
 
@@ -604,7 +605,6 @@ impl CcBox<()> {
         let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting {
-                possible_cycles,
                 root_list,
                 non_root_list,
                 queue,
@@ -628,8 +628,9 @@ impl CcBox<()> {
                     }
                 } else {
                     if counter_marker.is_in_possible_cycles() {
-                        counter_marker.mark(Mark::NonMarked);
-                        possible_cycles.remove(ptr);
+                        let res = counter_marker.increment_tracing_counter();
+                        debug_assert!(res.is_ok());
+                        return;
                     }
 
                     counter_marker.reset_tracing_counter();

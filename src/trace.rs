@@ -21,7 +21,7 @@ use std::{
     ffi::{OsStr, OsString}
 };
 
-use crate::lists::{LinkedList, LinkedQueue, PossibleCycles};
+use crate::lists::{LinkedList, LinkedQueue};
 
 /// Trait to finalize objects before freeing them.
 ///
@@ -138,7 +138,6 @@ pub struct Context<'a> {
 
 pub(crate) enum ContextInner<'a> {
     Counting {
-        possible_cycles: &'a PossibleCycles,
         root_list: &'a mut LinkedList,
         non_root_list: &'a mut LinkedList,
         queue: &'a mut LinkedQueue,

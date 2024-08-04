@@ -442,14 +442,13 @@ fn trace_counting(
     queue: &mut LinkedQueue,
 ) {
     while let Some(ptr) = possible_cycles.remove_first() {
-        // Reset the tracing counter before tracing
-        unsafe { ptr.as_ref() }.counter_marker().reset_tracing_counter();
-        __trace_counting(ptr, possible_cycles, root_list, non_root_list, queue);
+        // The tracing counter has already been reset by add_to_list(...)
+        __trace_counting(ptr, root_list, non_root_list, queue);
     }
 
     while let Some(ptr) = queue.poll() {
         // The tracing counter has already been reset by CcBox::trace when ptr was inserted into the queue
-        __trace_counting(ptr, possible_cycles, root_list, non_root_list, queue);
+        __trace_counting(ptr, root_list, non_root_list, queue);
     }
 
     debug_assert!(possible_cycles.is_empty());
@@ -458,7 +457,6 @@ fn trace_counting(
 
 fn __trace_counting(
     ptr: NonNull<CcBox<()>>,
-    possible_cycles: &PossibleCycles,
     root_list: &mut LinkedList,
     non_root_list: &mut LinkedList,
     queue: &mut LinkedQueue,
@@ -472,7 +470,6 @@ fn __trace_counting(
     let drop_guard = ResetMarkDropGuard::new(ptr);
 
     let mut ctx = Context::new(ContextInner::Counting {
-        possible_cycles,
         root_list,
         non_root_list,
         queue,

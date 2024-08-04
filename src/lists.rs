@@ -307,6 +307,7 @@ impl PossibleCycles {
         if let Some(mut prev) = self.first.get() {
             for elem in self.iter() {
                 unsafe {
+                    elem.as_ref().counter_marker().reset_tracing_counter();
                     elem.as_ref().counter_marker().mark(mark);
                 }
                 prev = elem;
