@@ -8,7 +8,7 @@ mod benches {
 }
 
 use std::hint::black_box;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use iai_callgrind::{library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, main};
 use crate::benches::binary_trees::count_binary_trees;
 use crate::benches::binary_trees_with_parent_pointers::count_binary_trees_with_parent;
 use crate::benches::large_linked_list::large_linked_list;
@@ -53,4 +53,7 @@ library_benchmark_group!(
     benchmarks = large_linked_list_bench
 );
 
-main!(library_benchmark_groups = stress_tests_group, binary_trees_group, linked_lists_group);
+main!(
+    config = LibraryBenchmarkConfig::default().raw_callgrind_args(["--branch-sim=yes"]);
+    library_benchmark_groups = stress_tests_group, binary_trees_group, linked_lists_group
+);
