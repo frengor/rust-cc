@@ -513,31 +513,27 @@ pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
 pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
-    let _ = POSSIBLE_CYCLES.try_with(|pc| {
-        if counter_marker.is_in_possible_cycles() {
-            #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(pc.iter().contains(ptr));
-
-            pc.remove(ptr);
-            // Already marked
-        } else {
+    if !counter_marker.is_in_possible_cycles() {
+        let _ = POSSIBLE_CYCLES.try_with(|pc| {
             #[cfg(feature = "pedantic-debug-assertions")]
             debug_assert!(!pc.iter().contains(ptr));
 
             debug_assert!(counter_marker.is_not_marked());
 
+            pc.add(ptr);
             counter_marker.reset_tracing_counter();
             counter_marker.mark(Mark::PossibleCycles);
-        }
+        });
+    } else {
+        // Already in the list
 
-        #[cfg(debug_assertions)] // pc.add(...) may panic in debug builds
-        let drop_guard = ResetMarkDropGuard::new(ptr);
-
-        pc.add(ptr);
-
-        #[cfg(debug_assertions)]
-        mem::forget(drop_guard);
-    });
+        #[cfg(feature = "pedantic-debug-assertions")]
+        debug_assert! {
+            POSSIBLE_CYCLES.try_with(|pc| {
+                pc.iter().contains(ptr)
+            }).unwrap_or(true)
+        };
+    }
 }
 
 // Functions in common between every CcBox<_>
