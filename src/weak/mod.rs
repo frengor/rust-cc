@@ -119,7 +119,7 @@ impl<T: ?Sized + Trace> Weak<T> {
                ) {
                 0
             } else {
-                counter
+                counter as u32
             }
         } else {
             0

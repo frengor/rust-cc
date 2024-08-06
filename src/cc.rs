@@ -114,7 +114,7 @@ impl<T: ?Sized + Trace> Cc<T> {
     /// Returns the number of [`Cc`]s to the pointed allocation.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        self.counter_marker().counter()
+        self.counter_marker().counter() as u32
     }
 
     /// Returns `true` if the strong reference count is `1`, `false` otherwise.
