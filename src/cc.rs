@@ -20,7 +20,6 @@ use core::{
 use crate::counter_marker::{CounterMarker, Mark};
 use crate::state::{replace_state_field, state, State, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
-use crate::list::ListMethods;
 use crate::utils::*;
 use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptrs")]
@@ -79,7 +78,7 @@ impl<T: Trace> Cc<T> {
         assert!(self.is_unique(), "Cc<_> is not unique");
 
         assert!(
-            !self.counter_marker().is_traced(),
+            !self.counter_marker().is_in_list_or_queue(),
             "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
         );
 
@@ -107,7 +106,7 @@ impl<T: ?Sized + Trace> Cc<T> {
     /// Returns the number of [`Cc`]s to the pointed allocation.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        self.counter_marker().counter()
+        self.counter_marker().counter() as u32
     }
 
     /// Returns `true` if the strong reference count is `1`, `false` otherwise.
@@ -252,10 +251,9 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
             add_to_list(cc.inner.cast());
         }
 
-        // A CcBox can be marked traced only during collections while being into a list different than POSSIBLE_CYCLES.
+        // A CcBox can be in list or queue only during collections while being into a list different than POSSIBLE_CYCLES.
         // In this case, no further action has to be taken, except decrementing the reference counter.
-        // Skip the rest of the code also when the value has already been dropped
-        if self.counter_marker().is_traced_or_dropped() {
+        if self.counter_marker().is_in_list_or_queue() {
             decrement_counter(self);
             return;
         }
@@ -291,7 +289,7 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
                 {
                     // Set the object as dropped before dropping and deallocating it
                     // This feature is used only in weak pointers, so do this only if they're enabled
-                    self.counter_marker().mark(Mark::Dropped);
+                    self.counter_marker().set_dropped(true);
 
                     self.inner().drop_metadata();
                 }
@@ -320,9 +318,7 @@ unsafe impl<T: ?Sized + Trace> Trace for Cc<T> {
     #[inline]
     #[track_caller]
     fn trace(&self, ctx: &mut Context<'_>) {
-        if CcBox::trace(self.inner.cast(), ctx) {
-            self.inner().get_elem().trace(ctx);
-        }
+        CcBox::trace(self.inner.cast(), ctx);
     }
 }
 
@@ -495,27 +491,19 @@ impl<T: ?Sized + Trace> Finalize for CcBox<T> {
 pub(crate) fn remove_from_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
-    // Check if ptr is in possible_cycles list
     if counter_marker.is_in_possible_cycles() {
-        // ptr is in the list, remove it
         let _ = POSSIBLE_CYCLES.try_with(|pc| {
-            let mut list = pc.borrow_mut();
-            // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(list.contains(ptr));
+            debug_assert!(pc.iter().contains(ptr));
 
             counter_marker.mark(Mark::NonMarked);
-            list.remove(ptr);
+            pc.remove(ptr);
         });
     } else {
-        // ptr is not in the list
-
-        // Confirm !is_in_possible_cycles() in debug builds.
-        // This is safe to do since we're not putting the CcBox into the list
         #[cfg(feature = "pedantic-debug-assertions")]
         debug_assert! {
             POSSIBLE_CYCLES.try_with(|pc| {
-                !pc.borrow().contains(ptr)
+                !pc.iter().contains(ptr)
             }).unwrap_or(true)
         };
     }
@@ -526,30 +514,29 @@ pub(crate) fn add_to_list(ptr: NonNull<CcBox<()>>) {
     let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
     let _ = POSSIBLE_CYCLES.try_with(|pc| {
-        let mut list = pc.borrow_mut();
-
-        // Check if ptr is in possible_cycles list since we have to move it at its start
         if counter_marker.is_in_possible_cycles() {
-            // Confirm is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(list.contains(ptr));
+            debug_assert!(pc.iter().contains(ptr));
 
-            list.remove(ptr);
-            // In this case we don't need to update the mark since we put it back into the list
+            pc.remove(ptr);
+            // Already marked
         } else {
-            // Confirm !is_in_possible_cycles() in debug builds
             #[cfg(feature = "pedantic-debug-assertions")]
-            debug_assert!(!list.contains(ptr));
+            debug_assert!(!pc.iter().contains(ptr));
+
             debug_assert!(counter_marker.is_not_marked());
 
-            // Mark it
+            counter_marker.reset_tracing_counter();
             counter_marker.mark(Mark::PossibleCycles);
         }
-        // Add to the list
-        //
-        // Make sure this operation is the first after the if-else, since the CcBox is in
-        // an invalid state now (it's marked Mark::PossibleCycles, but it isn't into the list)
-        list.add(ptr);
+
+        #[cfg(debug_assertions)] // pc.add(...) may panic in debug builds
+        let drop_guard = ResetMarkDropGuard::new(ptr);
+
+        pc.add(ptr);
+
+        #[cfg(debug_assertions)]
+        mem::forget(drop_guard);
     });
 }
 
@@ -585,7 +572,7 @@ impl CcBox<()> {
         {
             // Set the object as dropped before dropping it
             // This feature is used only in weak pointers, so do this only if they're enabled
-            ptr.as_ref().counter_marker().mark(Mark::Dropped);
+            ptr.as_ref().counter_marker().set_dropped(true);
         }
 
         CcBox::get_traceable(ptr).as_mut().drop_elem();
@@ -605,81 +592,16 @@ impl CcBox<()> {
         }
     }
 
-    pub(super) fn start_tracing(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
-        let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
-        match ctx.inner() {
-            ContextInner::Counting { root_list, .. } => {
-                // ptr is NOT into POSSIBLE_CYCLES list: ptr has just been removed from
-                // POSSIBLE_CYCLES by rust_cc::collect() (see lib.rs) before calling this function
-
-                root_list.add(ptr);
-
-                // Reset trace_counter
-                counter_marker.reset_tracing_counter();
-
-                // Element is surely not already marked, marking
-                counter_marker.mark(Mark::Traced);
-            },
-            ContextInner::RootTracing { .. } => {
-                // ptr is a root
-
-                // Nothing to do here, ptr is already unmarked
-                debug_assert!(counter_marker.is_not_marked());
-            },
-        }
-
-        // ptr is surely to trace
-        //
-        // This function is called from collect_cycles(), which doesn't know the
-        // exact type of the element inside CcBox, so trace it using the vtable
-        CcBox::trace_inner(ptr, ctx);
-    }
-
-    /// Returns whether `ptr.elem` should be traced.
-    ///
-    /// This function returns a `bool` instead of directly tracing the element inside the CcBox, since this way
-    /// we can avoid using the vtable most of the times (the responsibility of tracing the inner element is passed
-    /// to the caller, which *might* have more information on the type inside CcBox than us).
     #[inline(never)] // Don't inline this function, it's huge
-    #[must_use = "the element inside ptr is not traced by CcBox::trace"]
-    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) -> bool {
-        #[inline(always)]
-        fn non_root(counter_marker: &CounterMarker) -> bool {
-            counter_marker.tracing_counter() == counter_marker.counter()
-        }
-
+    fn trace(ptr: NonNull<Self>, ctx: &mut Context<'_>) {
         let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
         match ctx.inner() {
             ContextInner::Counting {
                 root_list,
                 non_root_list,
+                queue,
             } => {
-                if !counter_marker.is_traced() {
-                    // Not already marked
-
-                    // Make sure ptr is not in POSSIBLE_CYCLES list
-                    remove_from_list(ptr);
-
-                    counter_marker.reset_tracing_counter();
-                    let res = counter_marker.increment_tracing_counter();
-                    debug_assert!(res.is_ok());
-
-                    // Check invariant (tracing_counter is always less or equal to counter)
-                    debug_assert!(counter_marker.tracing_counter() <= counter_marker.counter());
-
-                    if non_root(counter_marker) {
-                        non_root_list.add(ptr);
-                    } else {
-                        root_list.add(ptr);
-                    }
-
-                    // Marking here since the previous debug_asserts might panic
-                    // before ptr is actually added to root_list or non_root_list
-                    counter_marker.mark(Mark::Traced);
-
-                    // Continue tracing
-                    true
-                } else {
+                if counter_marker.is_in_list_or_queue() {
                     // Check counters invariant (tracing_counter is always less or equal to counter)
                     // Only < is used here since tracing_counter will be incremented (by 1)
                     debug_assert!(counter_marker.tracing_counter() < counter_marker.counter());
@@ -687,33 +609,41 @@ impl CcBox<()> {
                     let res = counter_marker.increment_tracing_counter();
                     debug_assert!(res.is_ok());
 
-                    if non_root(counter_marker) {
-                        // Already marked, so ptr was put in root_list
+                    if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
+                        // ptr is in root_list
+
+                        #[cfg(feature = "pedantic-debug-assertions")]
+                        debug_assert!(root_list.iter().contains(ptr));
+
                         root_list.remove(ptr);
                         non_root_list.add(ptr);
                     }
-
-                    // Don't continue tracing
-                    false
-                }
-            },
-            ContextInner::RootTracing { non_root_list, root_list } => {
-                if counter_marker.is_traced() {
-                    // Marking NonMarked since ptr will be removed from any list it's into. Also, marking
-                    // NonMarked will avoid tracing this CcBox again (thanks to the if condition)
-                    counter_marker.mark(Mark::NonMarked);
-
-                    if non_root(counter_marker) {
-                        non_root_list.remove(ptr);
-                    } else {
-                        root_list.remove(ptr);
+                } else {
+                    if counter_marker.is_in_possible_cycles() {
+                        let res = counter_marker.increment_tracing_counter();
+                        debug_assert!(res.is_ok());
+                        return;
                     }
 
-                    // Continue root tracing
-                    true
-                } else {
-                    // Don't continue tracing
-                    false
+                    counter_marker.reset_tracing_counter();
+                    let res = counter_marker.increment_tracing_counter();
+                    debug_assert!(res.is_ok());
+
+                    queue.add(ptr);
+                    counter_marker.mark(Mark::InQueue);
+                }
+            },
+            ContextInner::RootTracing { non_root_list, queue } => {
+                if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
+                    // ptr is in non_root_list
+
+                    #[cfg(feature = "pedantic-debug-assertions")]
+                    debug_assert!(non_root_list.iter().contains(ptr));
+
+                    counter_marker.mark(Mark::NonMarked);
+                    non_root_list.remove(ptr);
+                    queue.add(ptr);
+                    counter_marker.mark(Mark::InQueue);
                 }
             },
         }

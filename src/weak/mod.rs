@@ -104,22 +104,22 @@ impl<T: ?Sized + Trace> Weak<T> {
             // SAFETY: self.cc is still allocated and can be dereferenced
             let counter_marker = unsafe { self.cc.as_ref() }.counter_marker();
 
-            // Return 0 if the object is traced and the collector is dropping. This is necessary since it's UB to access
+            // Return 0 if the object is in a list (or queue) and the collector is dropping. This is necessary since it's UB to access
             // Ccs from destructors, so calling upgrade on weak ptrs to such Ccs must be prevented.
-            // This check does this, since such Ccs will be traced at this point. Also, given that deallocations are done after
+            // This check does this, since such Ccs will be in a list at this point. Also, given that deallocations are done after
             // calling every destructor (this is an implementation detail), it's safe to access the counter_marker here.
-            // Lastly, if the state cannot be accessed just return 0 to avoid giving a Cc when calling upgrade
+            // Lastly, if the state cannot be accessed just return 0 to avoid giving a Cc when calling upgrade.
 
             // Return 0 also in the case the object was dropped, since weak pointers can survive the object itself
 
             let counter = counter_marker.counter();
             // Checking if the counter is already 0 avoids doing extra useless work, since the returned value would be the same
             if counter == 0 || counter_marker.is_dropped() || (
-                   counter_marker.is_traced() && try_state(|state| state.is_dropping()).unwrap_or(true)
+                   counter_marker.is_in_list_or_queue() && try_state(|state| state.is_dropping()).unwrap_or(true)
                ) {
                 0
             } else {
-                counter
+                counter as u32
             }
         } else {
             0

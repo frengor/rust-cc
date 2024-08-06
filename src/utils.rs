@@ -2,6 +2,7 @@ use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use core::ptr::NonNull;
 
 use crate::{CcBox, Trace};
+use crate::counter_marker::Mark;
 use crate::state::State;
 
 #[inline]
@@ -43,6 +44,24 @@ pub(crate) unsafe fn dealloc_other<T>(ptr: NonNull<T>) {
 #[inline(always)]
 #[cold]
 pub(crate) fn cold() {}
+
+pub(crate) struct ResetMarkDropGuard {
+    ptr: NonNull<CcBox<()>>,
+}
+
+impl ResetMarkDropGuard {
+    #[inline]
+    pub(crate) fn new(ptr: NonNull<CcBox<()>>) -> Self {
+        Self { ptr }
+    }
+}
+
+impl Drop for ResetMarkDropGuard {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe { self.ptr.as_ref() }.counter_marker().mark(Mark::NonMarked);
+    }
+}
 
 #[cfg(feature = "std")]
 pub(crate) use std::thread_local as rust_cc_thread_local; // Use the std's macro when std is enabled
