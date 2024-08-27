@@ -52,16 +52,15 @@ Thus, marking should be done only:
 
 ## Writing tests
 
-Every unit test should start with a call to `tests::reset_state()` to make sure errors in other tests don't impact the current one.
-
-Also, functions marked as `pub(crate)` and used only in unit tests should have the `for_tests` suffix, like `Cc::new_for_tests`.
+Every unit test (which makes use of a part of the collector) should start with a call to `tests::reset_state()` to make
+sure errors in other tests don't impact the current one.
 
 ## Writing documentation
 
 Docs are always built with every feature enabled. This makes it easier to write and maintain the documentation.
 
-However, this also makes it more difficult to write examples, as those must pass CI even when some of the features they 
-require are disabled. As such, examples are marked as `ignore`d if a feature they need is missing:
+However, this also makes it more difficult to write examples, as those must pass CI even when a features they require is disabled.
+As such, examples are marked as `ignore`d if a feature they need is missing:
 ```rust
 #![cfg_attr(
     feature = "derive",
