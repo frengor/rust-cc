@@ -129,12 +129,6 @@ impl<T: ?Sized + Trace> Cc<T> {
         self.counter_marker().counter() as u32
     }
 
-    /// Returns `true` if the strong reference count is `1`, `false` otherwise.
-    #[inline]
-    pub fn is_unique(&self) -> bool {
-        self.strong_count() == 1
-    }
-
     /// Makes the value in the managed allocation finalizable again.
     /// 
     /// # Panics
