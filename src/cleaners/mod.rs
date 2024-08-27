@@ -25,8 +25,8 @@
 //! As such, *when possible* it's suggested to prefer cleaners and disable finalization.
 
 use alloc::boxed::Box;
-use core::cell::RefCell;
 use core::fmt::{self, Debug, Formatter};
+use core::cell::{RefCell, UnsafeCell};
 use slotmap::{new_key_type, SlotMap};
 
 use crate::{Cc, Context, Finalize, Trace};
@@ -37,7 +37,7 @@ new_key_type! {
 }
 
 struct CleanerMap {
-    map: RefCell<Option<SlotMap<CleanerKey, CleaningAction>>>, // The Option is used to avoid allocating until a cleaning action is registered
+    map: RefCell<SlotMap<CleanerKey, CleaningAction>>,
 }
 
 unsafe impl Trace for CleanerMap {
@@ -63,7 +63,7 @@ impl Drop for CleaningAction {
 ///
 /// All the cleaning actions registered in a `Cleaner` are run when it is dropped, unless they have been manually executed before.
 pub struct Cleaner {
-    cleaner_map: Cc<CleanerMap>,
+    cleaner_map: UnsafeCell<Option<Cc<CleanerMap>>>, // The Option is used to avoid allocating until a cleaning action is registered
 }
 
 impl Cleaner {
@@ -71,9 +71,7 @@ impl Cleaner {
     #[inline]
     pub fn new() -> Cleaner {
         Cleaner {
-            cleaner_map: Cc::new(CleanerMap {
-                map: RefCell::new(None),
-            }),
+            cleaner_map: UnsafeCell::new(None),
         }
     }
 
@@ -87,21 +85,27 @@ impl Cleaner {
     /// be leaked and the cleaning action will never be executed.
     #[inline]
     pub fn register(&self, action: impl FnOnce() + 'static) -> Cleanable {
-        let map_key = self.cleaner_map
-            .map
-            .borrow_mut()
-            .get_or_insert_with(|| SlotMap::with_capacity_and_key(3))
-            .insert(CleaningAction(Some(Box::new(action))));
+        let cc = {
+            // SAFETY: no reference to the Option already exists
+            let map = unsafe { &mut *self.cleaner_map.get() };
+
+            map.get_or_insert_with(|| Cc::new(CleanerMap {
+                map: RefCell::new(SlotMap::with_capacity_and_key(3)),
+            }))
+        };
+
+        let map_key = cc.map.borrow_mut().insert(CleaningAction(Some(Box::new(action))));
 
         Cleanable {
-            cleaner_map: self.cleaner_map.downgrade(),
+            cleaner_map: cc.downgrade(),
             key: map_key,
         }
     }
 
     #[cfg(all(test, feature = "std"))] // Only used in unit tests
     pub(crate) fn has_allocated(&self) -> bool {
-        self.cleaner_map.map.borrow().is_some()
+        // SAFETY: no reference to the Option already exists
+        unsafe { (*self.cleaner_map.get()).is_some() }
     }
 }
 
@@ -146,10 +150,11 @@ impl Cleanable {
         // Try upgrading to see if the CleanerMap hasn't been deallocated
         let Some(cc) = self.cleaner_map.upgrade() else { return };
 
-        // Just return in case try_borrow_mut fails or the map is None
-        // (the latter shouldn't happen, but better be sure)
-        let Ok(mut ref_mut) = cc.map.try_borrow_mut() else { return };
-        let Some(map) = &mut *ref_mut else { return };
+        // Just return in case try_borrow_mut fails
+        let Ok(mut map) = cc.map.try_borrow_mut() else {
+            crate::utils::cold(); // Should never happen
+            return;
+        };
         let _ = map.remove(self.key);
     }
 }
