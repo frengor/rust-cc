@@ -448,3 +448,116 @@ fn buffered_objects_count_test() {
     drop(cc);
     collect_cycles();
 }
+
+#[test]
+fn try_unwrap_test() {
+    reset_state();
+
+    let cc = Cc::new(5u32);
+    
+    #[cfg(feature = "weak-ptrs")]
+    let weak = cc.downgrade();
+    
+    let unwrapped = cc.try_unwrap();
+    assert_eq!(5, unwrapped.unwrap());
+
+    #[cfg(feature = "weak-ptrs")]
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn fail_try_unwrap_test() {
+    reset_state();
+
+    let cc = Cc::new(5u32);
+    let copy = cc.clone();
+
+    #[cfg(feature = "weak-ptrs")]
+    let weak = cc.downgrade();
+
+    assert!(cc.try_unwrap().is_err()); // cc dropped here
+
+    #[cfg(feature = "weak-ptrs")]
+    assert!(weak.upgrade().is_some());
+
+    let unwrapped = copy.try_unwrap();
+    assert_eq!(5, unwrapped.unwrap());
+
+    #[cfg(feature = "weak-ptrs")]
+    assert!(weak.upgrade().is_none());
+}
+
+#[cfg(feature = "finalization")]
+#[test]
+fn finalization_try_unwrap_test() {
+    reset_state();
+
+    struct Finalizable {
+        other: RefCell<Option<Cc<u32>>>,
+    }
+
+    unsafe impl Trace for Finalizable {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.other.trace(ctx);
+        }
+    }
+
+    impl Finalize for Finalizable {
+        fn finalize(&self) {
+            let res = self.other.take().unwrap().try_unwrap();
+            match res {
+                Err(cc) => assert_eq!(5, *cc),
+                _ => panic!("try_unwrap returned an Ok(...) value during finalization."),
+            }
+        }
+    }
+
+    let _ = Cc::new(Finalizable {
+        other: RefCell::new(Some(Cc::new(5u32))),
+    });
+}
+
+#[cfg(feature = "finalization")]
+#[test]
+fn cyclic_finalization_try_unwrap_test() {
+    reset_state();
+
+    thread_local! {
+        static FINALIZED: Cell<bool> = Cell::new(false);
+    }
+
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Self>>>,
+        other: RefCell<Option<Cc<u32>>>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+            self.other.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {
+        fn finalize(&self) {
+            FINALIZED.with(|fin| fin.set(true));
+            state(|state| assert!(state.is_collecting()));
+
+            let res = self.other.take().unwrap().try_unwrap();
+            match res {
+                Err(cc) => assert_eq!(5, *cc),
+                _ => panic!("try_unwrap returned an Ok(...) value during collection."),
+            }
+        }
+    }
+
+    let cc = Cc::new(Cyclic {
+        cyclic: RefCell::new(None),
+        other: RefCell::new(Some(Cc::new(5u32))),
+    });
+    *cc.cyclic.borrow_mut() = Some(cc.clone());
+    drop(cc);
+    collect_cycles();
+    
+    FINALIZED.with(|fin| assert!(fin.get()));
+}

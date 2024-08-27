@@ -2,7 +2,7 @@ use alloc::alloc::Layout;
 use alloc::rc::Rc;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
-use core::mem;
+use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::ptr::{self, drop_in_place, NonNull};
 use core::borrow::Borrow;
@@ -66,32 +66,52 @@ impl<T: Trace> Cc<T> {
         })
     }
 
-    /// Takes out the value inside a [`Cc`].
-    ///
-    /// # Panics
-    /// Panics if the [`Cc`] is not unique (see [`is_unique`]).
-    ///
-    /// [`is_unique`]: fn@Cc::is_unique
+    /// Returns the inner value, if the [`Cc`] has exactly one strong reference and the collector is not collecting, finalizing or dropping.
+    /// 
+    /// Otherwise, an [`Err`] is returned with the same [`Cc`] this method was called on.
+    /// 
+    /// This will succeed even if there are outstanding weak references.
     #[inline]
     #[track_caller]
-    pub fn into_inner(self) -> T {
-        assert!(self.is_unique(), "Cc<_> is not unique");
+    pub fn try_unwrap(self) -> Result<T, Self> {
+        let cc = ManuallyDrop::new(self); // Never drop the Cc
 
-        assert!(
-            !self.counter_marker().is_in_list_or_queue(),
-            "Cc<_> is being used by the collector and inner value cannot be taken out (this might have happen inside Trace, Finalize or Drop implementations)."
-        );
+        if cc.strong_count() != 1 {
+            // No need to access the state here
+            return Err(ManuallyDrop::into_inner(cc));
+        }
 
-        // Make sure self is not into POSSIBLE_CYCLES before deallocating
-        remove_from_list(self.inner.cast());
+        let res = try_state(|state| {
+            if state.is_collecting() || state.is_dropping() {
+                return None;
+            }
 
-        // SAFETY: self is unique and is not inside any list
-        unsafe {
-            let t = ptr::read(self.inner().get_elem());
-            let layout = self.inner().layout();
-            let _ = try_state(|state| cc_dealloc(self.inner, layout, state));
-            mem::forget(self); // Don't call drop on this Cc
-            t
+            #[cfg(feature = "finalization")]
+            if state.is_finalizing() {
+                // To make this method behave the same outside of collections, unwrapping while finalizing is prohibited
+                return None;
+            }
+
+            remove_from_list(cc.inner.cast());
+
+            // Disable upgrading weak ptrs
+            #[cfg(feature = "weak-ptrs")]
+            cc.inner().drop_metadata();
+            // There's no reason here to call CounterMarker::set_dropped, since the pointed value will not be dropped
+
+            // SAFETY: cc is unique and no weak pointer can be upgraded
+            let t = unsafe { ptr::read(cc.inner().get_elem()) };
+            let layout = cc.inner().layout();
+            // SAFETY: cc is unique, is not inside any list and no weak pointer can be upgraded
+            unsafe {
+                cc_dealloc(cc.inner, layout, state);
+            }
+            Some(t)
+        });
+
+        match res {
+            Ok(Some(t)) => Ok(t),
+            _ => Err(ManuallyDrop::into_inner(cc)),
         }
     }
 }
@@ -107,12 +127,6 @@ impl<T: ?Sized + Trace> Cc<T> {
     #[inline]
     pub fn strong_count(&self) -> u32 {
         self.counter_marker().counter() as u32
-    }
-
-    /// Returns `true` if the strong reference count is `1`, `false` otherwise.
-    #[inline]
-    pub fn is_unique(&self) -> bool {
-        self.strong_count() == 1
     }
 
     /// Makes the value in the managed allocation finalizable again.
