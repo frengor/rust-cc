@@ -76,6 +76,7 @@ impl LinkedList {
             Some(first) => unsafe {
                 self.first = *first.as_ref().get_next();
                 if let Some(next) = self.first {
+                    crate::utils::prefetch(*next.as_ref().get_next());
                     *next.as_ref().get_prev() = None;
                 }
                 *first.as_ref().get_next() = None;
@@ -161,6 +162,7 @@ impl<'a> Iterator for Iter<'a> {
                 unsafe {
                     self.next = *ptr.as_ref().get_next();
                 }
+                crate::utils::prefetch(self.next);
                 Some(ptr)
             },
             None => {
@@ -277,6 +279,7 @@ impl PossibleCycles {
                 let new_first = *first.as_ref().get_next();
                 self.first.set(new_first);
                 if let Some(next) = new_first {
+                    crate::utils::prefetch(*next.as_ref().get_next());
                     *next.as_ref().get_prev() = None;
                 }
                 *first.as_ref().get_next() = None;
@@ -408,7 +411,10 @@ impl LinkedQueue {
         match self.first {
             Some(first) => unsafe {
                 self.first = *first.as_ref().get_next();
-                if self.first.is_none() {
+                if let Some(next) = self.first {
+                    use core::arch::x86_64::{_mm_prefetch, _MM_HINT_ET0};
+                    _mm_prefetch::<_MM_HINT_ET0>(next.cast().as_ptr());
+                } else {
                     // The last element is being removed
                     self.last = None;
                 }

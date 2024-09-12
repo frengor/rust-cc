@@ -24,6 +24,16 @@ pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
     dealloc(ptr.cast().as_ptr(), layout);
 }
 
+#[inline(always)]
+pub(crate) fn prefetch<T: ?Sized + Trace + 'static>(ptr: Option<NonNull<CcBox<T>>>) {
+    if let Some(ptr) = ptr {
+        unsafe {
+            use core::arch::x86_64::{_mm_prefetch, _MM_HINT_ET0};
+            _mm_prefetch::<_MM_HINT_ET0>(ptr.cast().as_ptr());
+        }
+    }
+}
+
 #[cfg(any(feature = "weak-ptrs", feature = "cleaners"))]
 #[inline]
 pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
