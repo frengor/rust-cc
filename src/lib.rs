@@ -403,9 +403,6 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
         unsafe {
             debug_assert!(ptr.as_ref().counter_marker().is_in_list());
 
-            #[cfg(feature = "weak-ptrs")]
-            ptr.as_ref().drop_metadata();
-
             CcBox::drop_inner(ptr.cast());
         };
 
@@ -428,6 +425,12 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
         //         and then the allocation gets deallocated immediately after.
         unsafe {
             let layout = ptr.as_ref().layout();
+
+            // Free metadata only after having read the layout from the vtable
+            // Necessary only with weak pointers enabled
+            #[cfg(feature = "weak-ptrs")]
+            ptr.as_ref().drop_metadata();
+
             cc_dealloc(ptr, layout, state);
         }
     });

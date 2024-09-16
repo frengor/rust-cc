@@ -77,6 +77,7 @@ impl<T: Trace> Cc<T> {
         let cc = ManuallyDrop::new(self); // Never drop the Cc
 
         if cc.strong_count() != 1 {
+            // cc is not unique
             // No need to access the state here
             return Err(ManuallyDrop::into_inner(cc));
         }
@@ -94,14 +95,15 @@ impl<T: Trace> Cc<T> {
 
             remove_from_list(cc.inner.cast());
 
-            // Disable upgrading weak ptrs
-            #[cfg(feature = "weak-ptrs")]
-            cc.inner().drop_metadata();
-            // There's no reason here to call CounterMarker::set_dropped, since the pointed value will not be dropped
-
-            // SAFETY: cc is unique and no weak pointer can be upgraded
+            // SAFETY: cc is unique
             let t = unsafe { ptr::read(cc.inner().get_elem()) };
             let layout = cc.inner().layout();
+
+            // Disable upgrading weak ptrs (after having read the layout)
+            #[cfg(feature = "weak-ptrs")]
+            cc.inner().drop_metadata();
+            // There's no reason here to call CounterMarker::set_dropped, since the pointed value will not be dropped and the allocation will be freed
+
             // SAFETY: cc is unique, is not inside any list and no weak pointer can be upgraded
             unsafe {
                 cc_dealloc(cc.inner, layout, state);
@@ -304,8 +306,6 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
                     // Set the object as dropped before dropping and deallocating it
                     // This feature is used only in weak pointers, so do this only if they're enabled
                     self.counter_marker().set_dropped(true);
-
-                    self.inner().drop_metadata();
                 }
 
                 // SAFETY: we're the only one to have a pointer to this allocation
@@ -317,6 +317,10 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
                         0, self.counter_marker().counter(),
                         "Trying to deallocate a CcBox with a reference counter > 0"
                     );
+
+                    // Free metadata (the layout has already been read). Necessary only with weak pointers enabled
+                    #[cfg(feature = "weak-ptrs")]
+                    self.inner().drop_metadata();
 
                     cc_dealloc(self.inner, layout, state);
                 }

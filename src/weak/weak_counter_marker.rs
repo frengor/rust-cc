@@ -16,7 +16,7 @@ pub(crate) const MAX: u16 = !ACCESSIBLE_MASK; // First 15 bits to 1
 /// +-----------+-----------+
 /// ```
 ///
-/// * `A` is `1` when the `Cc` is accessible, `0` otherwise
+/// * `A` is `1` when the `CcBox` is accessible (i.e., not deallocated), `0` otherwise
 /// * `B` is the weak counter
 #[derive(Clone, Debug)]
 pub(crate) struct WeakCounterMarker {
