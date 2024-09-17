@@ -411,3 +411,38 @@ fn weak_new_ptr_eq() {
     assert!(Weak::ptr_eq(&cc.downgrade(), &cc.downgrade()));
     assert!(!Weak::ptr_eq(&cc.downgrade(), &other_cc.downgrade()));
 }
+
+#[test]
+fn drop_zero_weak_counter() {
+    reset_state();
+
+    let cc = Cc::new(5u32);
+    let _ = cc.downgrade();
+    drop(cc);
+}
+
+#[test]
+fn cyclic_drop_zero_weak_counter() {
+    reset_state();
+
+    struct Cyclic {
+        cyclic: RefCell<Option<Cc<Cyclic>>>,
+    }
+
+    unsafe impl Trace for Cyclic {
+        fn trace(&self, ctx: &mut Context<'_>) {
+            self.cyclic.trace(ctx);
+        }
+    }
+
+    impl Finalize for Cyclic {}
+
+    let cc = Cc::new(Cyclic {
+        cyclic: RefCell::new(None),
+    });
+    *cc.cyclic.borrow_mut() = Some(cc.clone());
+
+    let _ = cc.downgrade();
+    drop(cc);
+    collect_cycles();
+}

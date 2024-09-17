@@ -286,11 +286,13 @@ let cyclic = Cc::new_cyclic(|weak| {
         impl<T: Trace> Drop for PanicGuard<T> {
             fn drop(&mut self) {
                 unsafe {
-                    // Deallocate only the metadata allocation
+                    let layout = self.invalid_cc.as_ref().layout();
+
+                    // Deallocate only the metadata allocation (the layout has already been read)
                     self.invalid_cc.as_ref().drop_metadata();
+
                     // Deallocate the CcBox. Use try_state to avoid panicking inside a Drop
                     let _ = try_state(|state| {
-                        let layout = self.invalid_cc.as_ref().layout();
                         cc_dealloc(self.invalid_cc, layout, state);
                     });
                 }
