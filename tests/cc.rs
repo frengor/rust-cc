@@ -1,4 +1,4 @@
-#![allow(clippy::thread_local_initializer_can_be_made_const)]
+#![allow(clippy::missing_const_for_thread_local)]
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
