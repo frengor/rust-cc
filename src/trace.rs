@@ -98,7 +98,7 @@ struct Foo<A: Trace + 'static, B: Trace + 'static> {
 ///     must be a subset of the [`Cc`] instances traced in the first one.  
 ///     Tracing can be detected using the [`state::is_tracing`] function. If it never returned `false` between two [`trace`] calls
 ///     on the same value, then they are part of the same tracing phase.
-///   * The [`trace`] implementation must not create, clone, dereference or drop any [`Cc`].
+///   * The [`trace`] implementation must not create, clone, move, dereference or drop any [`Cc`].
 ///   * If the implementing type implements [`Drop`], then the [`Drop::drop`] implementation must not create, clone, move, dereference, drop or call
 ///     any method on any [`Cc`] instance.
 ///
