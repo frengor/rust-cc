@@ -13,7 +13,7 @@ use core::hash::{Hash, Hasher};
 use core::panic::{RefUnwindSafe, UnwindSafe};
 #[cfg(feature = "nightly")]
 use core::{
-    marker::SmartPointer,
+    marker::CoercePointee,
     ptr::{metadata, DynMetadata},
 };
 
@@ -28,7 +28,7 @@ use crate::weak::weak_counter_marker::WeakCounterMarker;
 /// A thread-local cycle collected pointer.
 ///
 /// See the [module-level documentation][`mod@crate`] for more details.
-#[cfg_attr(feature = "nightly", derive(SmartPointer))]
+#[cfg_attr(feature = "nightly", derive(CoercePointee))]
 #[repr(transparent)]
 pub struct Cc<#[cfg_attr(feature = "nightly", pointee)] T: ?Sized + Trace + 'static> {
     inner: NonNull<CcBox<T>>,
