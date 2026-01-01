@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use crate::tests::reset_state;
-use crate::{collect_cycles, Cc, Context, Trace};
+use crate::{Cc, Context, Trace, collect_cycles};
 
 thread_local! {
    static FREED_LIST: RefCell<String> = RefCell::new(String::with_capacity(10));

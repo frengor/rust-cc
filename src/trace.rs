@@ -1,24 +1,24 @@
+use alloc::boxed::Box;
+use alloc::ffi::CString;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::ffi::CStr;
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::num::{
-    NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU128,
-    NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
+    NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8,
+    NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize,
 };
 use core::panic::AssertUnwindSafe;
 use core::sync::atomic::{
-    AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16, AtomicU32,
-    AtomicU64, AtomicU8, AtomicUsize,
+    AtomicBool, AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicIsize, AtomicU8, AtomicU16,
+    AtomicU32, AtomicU64, AtomicUsize,
 };
-use alloc::boxed::Box;
-use alloc::vec::Vec;
-use alloc::ffi::CString;
-use alloc::string::String;
 #[cfg(feature = "std")]
 use std::{
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
-    ffi::{OsStr, OsString}
 };
 
 use crate::lists::{LinkedList, LinkedQueue};
@@ -31,14 +31,8 @@ use crate::lists::{LinkedList, LinkedQueue};
 /// # Derive macro
 ///
 /// The [`Finalize`][`macro@crate::Finalize`] derive macro can be used to implement an empty finalizer:
-#[cfg_attr(
-    feature = "derive",
-    doc = r"```rust"
-)]
-#[cfg_attr(
-    not(feature = "derive"),
-    doc = r"```rust,ignore"
-)]
+#[cfg_attr(feature = "derive", doc = r"```rust")]
+#[cfg_attr(not(feature = "derive"), doc = r"```rust,ignore")]
 #[doc = r"# use rust_cc::*;
 # use rust_cc_derive::*;
 #[derive(Finalize)]
@@ -53,7 +47,7 @@ pub trait Finalize {
     ///
     /// By default, objects are finalized only once. Use the method [`Cc::finalize_again`] to make finalization happen again for a certain object.
     /// Also, objects created during the execution of a finalizer are not automatically finalized.
-    /// 
+    ///
     /// # Default implementation
     ///
     /// The default implementation is empty.
@@ -67,14 +61,8 @@ pub trait Finalize {
 /// Trait to trace cycle-collectable objects.
 ///
 /// This trait is unsafe to implement, but can be safely derived using the [`Trace`][`macro@crate::Trace`] derive macro, which calls the [`trace`] method on every field:
-#[cfg_attr(
-    feature = "derive",
-    doc = r"```rust"
-)]
-#[cfg_attr(
-    not(feature = "derive"),
-    doc = r"```rust,ignore"
-)]
+#[cfg_attr(feature = "derive", doc = r"```rust")]
+#[cfg_attr(not(feature = "derive"), doc = r"```rust,ignore")]
 #[doc = r"# use rust_cc::*;
 # use rust_cc_derive::*;
 # #[derive(Finalize)]
@@ -160,7 +148,7 @@ impl<'b> Context<'b> {
 
     #[inline]
     pub(crate) fn inner<'a>(&'a mut self) -> &'a mut ContextInner<'b>
-        where
+    where
         'b: 'a,
     {
         &mut self.inner

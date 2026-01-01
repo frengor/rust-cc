@@ -4,9 +4,9 @@
 
 use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use rust_cc::*;
-use rust_cc::weak::*;
 
+use rust_cc::weak::*;
+use rust_cc::*;
 use test_case::test_case;
 
 struct Ignored<T: Trace + 'static> {

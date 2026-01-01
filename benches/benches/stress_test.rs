@@ -1,10 +1,10 @@
 //! Benchmark adapted from the shredder crate, released under MIT license. Src: https://github.com/Others/shredder/blob/266de5a3775567463ee82febc42eed1c9a8b6197/benches/shredder_benchmark.rs
 
 use std::cell::RefCell;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rand::seq::SliceRandom;
 
+use rand::SeedableRng;
+use rand::prelude::IndexedRandom;
+use rand::rngs::StdRng;
 use rust_cc::*;
 
 // BENCHMARK 1: My janky stress test

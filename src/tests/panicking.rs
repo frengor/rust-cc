@@ -2,11 +2,12 @@ use std::cell::{Cell, RefCell};
 use std::mem;
 
 use crate::tests::{assert_state_not_collecting, reset_state};
-use crate::{collect_cycles, Cc, Context, Finalize, Trace};
+use crate::{Cc, Context, Finalize, Trace, collect_cycles};
 
-fn register_panicking<T: Trace>(#[allow(unused_variables)] cc: &Cc<T>) { // The unused_variables warning is triggered when not running on Miri
+fn register_panicking<T: Trace>(#[allow(unused_variables)] cc: &Cc<T>) {
+    // The unused_variables warning is triggered when not running on Miri
     #[cfg(miri)]
-    extern "Rust" {
+    unsafe extern "Rust" {
         /// From Miri documentation:<br>
         /// _Miri-provided extern function to mark the block `ptr` points to as a "root"
         /// for some static memory. This memory and everything reachable by it is not
@@ -170,8 +171,7 @@ fn test_panicking_drop() {
         }
     }
 
-    impl Finalize for DropPanicking {
-    }
+    impl Finalize for DropPanicking {}
 
     impl Drop for DropPanicking {
         fn drop(&mut self) {

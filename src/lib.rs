@@ -5,19 +5,13 @@
 //! immediately when the reference counter drops to zero.
 //!
 //! Currently, the cycle collector is not concurrent. As such, [`Cc`] doesn't implement [`Send`] nor [`Sync`].
-//! 
+//!
 //! ## Examples
 //!
 //! ### Basic usage
 //!
-#![cfg_attr(
-    feature = "derive",
-    doc = r"```rust"
-)]
-#![cfg_attr(
-    not(feature = "derive"),
-    doc = r"```rust,ignore"
-)]
+#![cfg_attr(feature = "derive", doc = r"```rust")]
+#![cfg_attr(not(feature = "derive"), doc = r"```rust,ignore")]
 #![doc = r"# use rust_cc::*;
 # use rust_cc_derive::*;
 # use std::cell::RefCell;
@@ -49,7 +43,7 @@ collect_cycles();
 ```"]
 //!
 //! The derive macro for the `Finalize` trait generates an empty finalizer. To write custom finalizers implement the `Finalize` trait manually:
-//! 
+//!
 //! ```rust
 //!# use rust_cc::*;
 //!# struct Data;
@@ -60,17 +54,11 @@ collect_cycles();
 //!     }
 //! }
 //! ```
-//! 
+//!
 //! ### Weak pointers
 //!
-#![cfg_attr(
-    feature = "weak-ptrs",
-    doc = r"```rust"
-)]
-#![cfg_attr(
-    not(feature = "weak-ptrs"),
-    doc = r"```rust,ignore"
-)]
+#![cfg_attr(feature = "weak-ptrs", doc = r"```rust")]
+#![cfg_attr(not(feature = "weak-ptrs"), doc = r"```rust,ignore")]
 #![doc = r"# use rust_cc::*;
 # use rust_cc::weak::*;
 let cc: Cc<i32> = Cc::new(5);
@@ -91,13 +79,10 @@ assert!(weak_ptr.upgrade().is_none());
 ```"]
 //!
 //! See the [`weak` module documentation][`mod@weak`] for more details.
-//! 
+//!
 //! ### Cleaners
 //!
-#![cfg_attr(
-    all(feature = "cleaners", feature = "derive"),
-    doc = r"```rust"
-)]
+#![cfg_attr(all(feature = "cleaners", feature = "derive"), doc = r"```rust")]
 #![cfg_attr(
     not(all(feature = "cleaners", feature = "derive")),
     doc = r"```rust,ignore"
@@ -124,35 +109,39 @@ let cleanable = foo.cleaner.register(move || {
 // It's also possible to call the cleaning action manually
 cleanable.clean();
 ```"]
-//! 
+//!
 //! See the [`cleaners` module documentation][`mod@cleaners`] for more details.
-//! 
+//!
 //! [`Send`]: `std::marker::Send`
 //! [`Sync`]: `std::marker::Sync`
 //! [`Rc`]: `std::rc::Rc`
 
-#![cfg_attr(feature = "nightly", feature(unsize, coerce_unsized, ptr_metadata, derive_coerce_pointee))]
+#![cfg_attr(
+    feature = "nightly",
+    feature(unsize, coerce_unsized, ptr_metadata, derive_coerce_pointee)
+)]
 #![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(thread_local))] // no-std related unstable features
 #![cfg_attr(doc_auto_cfg, feature(doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
-
 #![deny(rustdoc::broken_intra_doc_links)]
 #![allow(clippy::missing_const_for_thread_local)]
 
 #[cfg(all(not(feature = "std"), not(feature = "nightly")))]
-compile_error!("Feature \"std\" cannot be disabled without enabling feature \"nightly\" (due to #[thread_local] not being stable).");
+compile_error!(
+    "Feature \"std\" cannot be disabled without enabling feature \"nightly\" (due to #[thread_local] not being stable)."
+);
 
 extern crate alloc;
 
 use core::mem;
 use core::mem::ManuallyDrop;
-use core::ptr::NonNull;
 use core::ops::{Deref, DerefMut};
+use core::ptr::NonNull;
 
 use crate::cc::CcBox;
 use crate::counter_marker::Mark;
 use crate::lists::*;
-use crate::state::{replace_state_field, State, try_state};
+use crate::state::{State, replace_state_field, try_state};
 use crate::trace::ContextInner;
 use crate::utils::*;
 
@@ -178,10 +167,9 @@ pub mod weak;
 #[cfg(feature = "cleaners")]
 pub mod cleaners;
 
+pub use cc::Cc;
 #[cfg(feature = "derive")]
 pub use derives::{Finalize, Trace};
-
-pub use cc::Cc;
 pub use trace::{Context, Finalize, Trace};
 
 rust_cc_thread_local! {
@@ -283,7 +271,12 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
         let mut root_list = LinkedList::new();
         let mut queue = LinkedQueue::new();
 
-        trace_counting(possible_cycles, &mut root_list, &mut non_root_list, &mut queue);
+        trace_counting(
+            possible_cycles,
+            &mut root_list,
+            &mut non_root_list,
+            &mut queue,
+        );
         trace_roots(root_list, &mut non_root_list, queue);
     }
 
@@ -292,10 +285,7 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
         non_root_list.iter().for_each(|ptr| {
             let counter_marker = unsafe { ptr.as_ref() }.counter_marker();
 
-            debug_assert_eq!(
-                counter_marker.tracing_counter(),
-                counter_marker.counter()
-            );
+            debug_assert_eq!(counter_marker.tracing_counter(), counter_marker.counter());
             debug_assert!(counter_marker.is_in_list());
         });
 
@@ -335,7 +325,11 @@ fn __collect(state: &State, possible_cycles: &PossibleCycles) {
                 // SAFETY: swap_list swapped pc and non_root_list, so every element inside non_root_list is already
                 //         marked PossibleCycles (because it was pc) and now old_size is the size of non_root_list
                 unsafe {
-                    possible_cycles.mark_self_and_append(Mark::PossibleCycles, non_root_list, old_size);
+                    possible_cycles.mark_self_and_append(
+                        Mark::PossibleCycles,
+                        non_root_list,
+                        old_size,
+                    );
                 }
             }
         }
@@ -417,7 +411,8 @@ fn deallocate_list(to_deallocate_list: LinkedList, state: &State) {
     to_deallocate_list.iter().for_each(|ptr| {
         #[cfg(feature = "pedantic-debug-assertions")]
         debug_assert_eq!(
-            0, unsafe { ptr.as_ref().counter_marker().counter() },
+            0,
+            unsafe { ptr.as_ref().counter_marker().counter() },
             "Trying to deallocate a CcBox with a reference counter > 0"
         );
 
@@ -489,11 +484,7 @@ fn __trace_counting(
     counter_marker.mark(Mark::InList);
 }
 
-fn trace_roots(
-    mut root_list: LinkedList,
-    non_root_list: &mut LinkedList,
-    mut queue: LinkedQueue,
-) {
+fn trace_roots(mut root_list: LinkedList, non_root_list: &mut LinkedList, mut queue: LinkedQueue) {
     while let Some(ptr) = root_list.remove_first() {
         __trace_roots(ptr, non_root_list, &mut queue);
     }
@@ -509,11 +500,7 @@ fn trace_roots(
     mem::forget(queue); // No need to run its destructor, it's already empty
 }
 
-fn __trace_roots(
-    ptr: NonNull<CcBox<()>>,
-    non_root_list: &mut LinkedList,
-    queue: &mut LinkedQueue,
-) {
+fn __trace_roots(ptr: NonNull<CcBox<()>>, non_root_list: &mut LinkedList, queue: &mut LinkedQueue) {
     let mut ctx = Context::new(ContextInner::RootTracing {
         non_root_list,
         queue,

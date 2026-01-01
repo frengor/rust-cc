@@ -1,11 +1,11 @@
 use std::cell::Cell;
-use std::rc::Rc;
-use crate::{Cc, collect_cycles, Context, Finalize, Trace};
-use super::reset_state;
-use crate::cleaners::{Cleanable, Cleaner};
-
 #[cfg(not(miri))] // Used by tests run only when not on miri
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::rc::Rc;
+
+use super::reset_state;
+use crate::cleaners::{Cleanable, Cleaner};
+use crate::{Cc, Context, Finalize, Trace, collect_cycles};
 
 #[test]
 fn clean_after_drop() {
@@ -157,9 +157,12 @@ fn simple_panic_on_clean() {
         panic!("Panic inside registered cleaner!");
     });
 
-    assert!(catch_unwind(AssertUnwindSafe(|| {
-        cleanable.clean();
-    })).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            cleanable.clean();
+        }))
+        .is_err()
+    );
 
     assert!(already_cleaned.get());
 }
@@ -179,9 +182,12 @@ fn simple_panic_on_cleaner_drop() {
         panic!("Panic inside registered cleaner!");
     });
 
-    assert!(catch_unwind(AssertUnwindSafe(|| {
-        drop(cleaner);
-    })).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            drop(cleaner);
+        }))
+        .is_err()
+    );
 
     assert!(already_cleaned.get());
 }
@@ -215,9 +221,12 @@ fn panic_on_clean() {
         panic!("Panic inside registered cleaner!");
     });
 
-    assert!(catch_unwind(AssertUnwindSafe(|| {
-        drop(to_clean);
-    })).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            drop(to_clean);
+        }))
+        .is_err()
+    );
 
     assert!(already_cleaned.get());
 }

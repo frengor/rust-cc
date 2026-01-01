@@ -1,7 +1,8 @@
 use std::panic::catch_unwind;
-use crate::*;
+
 use super::*;
 use crate::weak::Weak;
+use crate::*;
 
 #[test]
 fn weak_test() {
@@ -186,14 +187,17 @@ fn panicking_saving_new_cyclic() {
 
     impl Finalize for Cyclic {}
 
-    assert!(catch_unwind(|| {
-        let _cc = Cc::new_cyclic(|weak| {
-            SAVED.with(|saved| {
-                *saved.borrow_mut() = Some(weak.clone());
+    assert!(
+        catch_unwind(|| {
+            let _cc = Cc::new_cyclic(|weak| {
+                SAVED.with(|saved| {
+                    *saved.borrow_mut() = Some(weak.clone());
+                });
+                panic!();
             });
-            panic!();
-        });
-    }).is_err());
+        })
+        .is_err()
+    );
 
     SAVED.with(|saved| {
         let weak = &*saved.borrow();
@@ -244,9 +248,7 @@ fn try_upgrade_in_finalize_and_drop() {
     }
 
     let weak = {
-        let cc = Cc::new_cyclic(|weak| Cyclic {
-            weak: weak.clone(),
-        });
+        let cc = Cc::new_cyclic(|weak| Cyclic { weak: weak.clone() });
         assert_eq!(1, cc.strong_count());
         cc.downgrade()
         // cc is dropped and collected automatically
@@ -296,9 +298,7 @@ fn try_upgrade_and_resurrect_in_finalize_and_drop() {
     }
 
     {
-        let cc = Cc::new_cyclic(|weak| Cyclic {
-            weak: weak.clone(),
-        });
+        let cc = Cc::new_cyclic(|weak| Cyclic { weak: weak.clone() });
         assert_eq!(1, cc.strong_count());
         // cc is dropped and collected automatically
     }
@@ -377,7 +377,7 @@ fn try_upgrade_in_cyclic_finalize_and_drop() {
 #[test]
 fn weak_new() {
     reset_state();
-    
+
     let new: Weak<u32> = Weak::new();
 
     assert_eq!(0, new.weak_count());
@@ -394,10 +394,10 @@ fn weak_new() {
 #[test]
 fn weak_new_ptr_eq() {
     reset_state();
-    
+
     let new: Weak<u32> = Weak::new();
     let other_new: Weak<u32> = Weak::new();
-    
+
     let cc = Cc::new(5u32);
     let other_cc = Cc::new(6u32);
 

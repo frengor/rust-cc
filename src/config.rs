@@ -22,10 +22,11 @@
 
 use alloc::rc::Rc;
 use core::cell::RefCell;
-use core::num::NonZeroUsize;
 use core::marker::PhantomData;
+use core::num::NonZeroUsize;
 
 use thiserror::Error;
+
 use crate::lists::PossibleCycles;
 use crate::state::State;
 use crate::utils;
@@ -55,12 +56,14 @@ pub fn config<F, R>(f: F) -> Result<R, ConfigAccessError>
 where
     F: FnOnce(&mut Config) -> R,
 {
-    CONFIG.try_with(|config| {
-        config
-        .try_borrow_mut()
-        .or(Err(ConfigAccessError::ConcurrentAccessError))
-        .map(|mut config| f(&mut config))
-    }).unwrap_or(Err(ConfigAccessError::AccessError))
+    CONFIG
+        .try_with(|config| {
+            config
+                .try_borrow_mut()
+                .or(Err(ConfigAccessError::ConcurrentAccessError))
+                .map(|mut config| f(&mut config))
+        })
+        .unwrap_or(Err(ConfigAccessError::AccessError))
 }
 
 /// An error returned by [`config`][`fn@config`].
@@ -158,7 +161,11 @@ impl Config {
     }
 
     #[inline(always)]
-    pub(super) fn should_collect(&mut self, state: &State, possible_cycles: &PossibleCycles) -> bool {
+    pub(super) fn should_collect(
+        &mut self,
+        state: &State,
+        possible_cycles: &PossibleCycles,
+    ) -> bool {
         if !self.auto_collect {
             return false;
         }
@@ -178,9 +185,10 @@ impl Config {
     pub(super) fn adjust(&mut self, state: &State) {
         // First case: the threshold might have to be increased
         if state.allocated_bytes() >= self.bytes_threshold {
-
             loop {
-                let Some(new_threshold) = self.bytes_threshold.checked_shl(1) else { break; };
+                let Some(new_threshold) = self.bytes_threshold.checked_shl(1) else {
+                    break;
+                };
                 self.bytes_threshold = new_threshold;
                 if state.allocated_bytes() < self.bytes_threshold {
                     break;

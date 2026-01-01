@@ -2,9 +2,9 @@
 
 use proc_macro_error::{abort_if_dirty, emit_error, proc_macro_error};
 use quote::quote;
-use syn::{Attribute, Data, Meta, MetaList, Token};
 use syn::punctuated::Punctuated;
-use synstructure::{AddBounds, decl_derive, Structure};
+use syn::{Attribute, Data, Meta, MetaList, Token};
+use synstructure::{AddBounds, Structure, decl_derive};
 
 const IGNORE: &str = "ignore";
 const UNSAFE_NO_DROP: &str = "unsafe_no_drop";
@@ -14,25 +14,15 @@ decl_derive!([Trace, attributes(rust_cc)] => #[proc_macro_error] derive_trace_tr
 
 fn derive_trace_trait(mut s: Structure<'_>) -> proc_macro2::TokenStream {
     // Check if the struct is annotated with #[rust_cc(unsafe_no_drop)]
-    let no_drop = s.ast().attrs
-    .iter()
-    .any(|attr| attr_contains(attr, UNSAFE_NO_DROP));
+    let no_drop = s.ast().attrs.iter().any(|attr| attr_contains(attr, UNSAFE_NO_DROP));
 
     // Ignore every field and variant annotated with #[rust_cc(ignore)]
     // Filter fields before variants to be able to emit all the errors in case of wrong attributes in ignored variants
-    s.filter(|bi| {
-        !bi.ast().attrs
-        .iter()
-        .any(|attr| attr_contains(attr, IGNORE))
-    });
+    s.filter(|bi| !bi.ast().attrs.iter().any(|attr| attr_contains(attr, IGNORE)));
 
     // Filter variants only in case of enums
     if let Data::Enum(_) = s.ast().data {
-        s.filter_variants(|vi| {
-            !vi.ast().attrs
-            .iter()
-            .any(|attr| attr_contains(attr, IGNORE))
-        });
+        s.filter_variants(|vi| !vi.ast().attrs.iter().any(|attr| attr_contains(attr, IGNORE)));
     }
 
     // Abort if errors has been emitted

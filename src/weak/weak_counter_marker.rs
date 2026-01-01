@@ -1,4 +1,5 @@
 use core::cell::Cell;
+
 use crate::utils;
 
 const ACCESSIBLE_MASK: u16 = 1u16 << (u16::BITS - 1);
@@ -34,7 +35,7 @@ impl WeakCounterMarker {
                 INITIAL_VALUE_ACCESSIBLE
             } else {
                 INITIAL_VALUE
-            })
+            }),
         }
     }
 

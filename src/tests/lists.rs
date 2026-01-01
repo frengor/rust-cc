@@ -4,11 +4,11 @@ use std::ptr::NonNull;
 
 use test_case::{test_case, test_matrix};
 
-use crate::{CcBox, Mark};
 use crate::counter_marker::CounterMarker;
 use crate::lists::*;
 use crate::state::state;
 use crate::utils::cc_dealloc;
+use crate::{CcBox, Mark};
 
 fn assert_contains(list: &impl ListMethods, mut elements: Vec<i32>) {
     list.iter().for_each(|ptr| {
@@ -29,11 +29,7 @@ fn assert_contains(list: &impl ListMethods, mut elements: Vec<i32>) {
 }
 
 fn new_collection(elements: &[i32], coll: &mut impl CommonMethods) -> Vec<NonNull<CcBox<i32>>> {
-    elements
-        .iter()
-        .map(|&i| CcBox::new_for_tests(i))
-        .inspect(|&ptr| coll.add(ptr.cast()))
-        .collect()
+    elements.iter().map(|&i| CcBox::new_for_tests(i)).inspect(|&ptr| coll.add(ptr.cast())).collect()
 }
 
 fn deallocate(elements: Vec<NonNull<CcBox<i32>>>) {
@@ -142,14 +138,11 @@ fn test_remove_first(mut list: impl ListMethods) {
     let vec = new_collection(&elements, &mut list);
 
     // Mark to test the removal of the mark
-    list.iter().for_each(|ptr| unsafe {
-        ptr.as_ref().counter_marker().mark(Mark::InList)
-    });
+    list.iter().for_each(|ptr| unsafe { ptr.as_ref().counter_marker().mark(Mark::InList) });
 
     // Iterate over the list to get the elements in the correct order as in the list
-    elements = list.iter().map(|ptr| unsafe {
-        *ptr.cast::<CcBox<i32>>().as_ref().get_elem()
-    }).collect();
+    elements =
+        list.iter().map(|ptr| unsafe { *ptr.cast::<CcBox<i32>>().as_ref().get_elem() }).collect();
 
     for element in elements {
         let removed = list.remove_first().expect("List has smaller size then expected");
@@ -195,12 +188,14 @@ fn test_for_each_clearing_panic() {
         }
     }
 
-    let res = catch_unwind(AssertUnwindSafe(|| list.into_iter().for_each(|ptr| {
-        // Manually set mark for the first CcBox, the others should be handled by List::drop
-        unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if let Some(ptr) = list.into_iter().next() {
+            // Manually set mark for the first CcBox, the others should be handled by List::drop
+            unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
 
-        panic!("into_iter().for_each panic");
-    })));
+            panic!("into_iter().for_each panic");
+        }
+    }));
 
     assert!(res.is_err(), "Hasn't panicked.");
 
@@ -247,12 +242,18 @@ fn test_mark_self_and_append() {
     let vec = new_collection(&elements, &mut list);
     let vec_to_append = new_collection(&elements_to_append, &mut to_append);
 
-    let list_size = list.iter().inspect(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::InList);
-    }).count();
-    let to_append_size = to_append.iter().inspect(|elem| unsafe {
-        elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
-    }).count();
+    let list_size = list
+        .iter()
+        .inspect(|elem| unsafe {
+            elem.as_ref().counter_marker().mark(Mark::InList);
+        })
+        .count();
+    let to_append_size = to_append
+        .iter()
+        .inspect(|elem| unsafe {
+            elem.as_ref().counter_marker().mark(Mark::PossibleCycles);
+        })
+        .count();
 
     unsafe {
         list.mark_self_and_append(Mark::PossibleCycles, to_append, to_append_size);
@@ -387,7 +388,7 @@ trait ListMethods: CommonMethods {
 
     fn is_empty(&self) -> bool;
 
-    fn iter(&self) -> Iter;
+    fn iter(&self) -> Iter<'_>;
 
     fn assert_size(&self, expected_size: usize);
 }
@@ -415,7 +416,7 @@ impl ListMethods for LinkedList {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 
@@ -447,7 +448,7 @@ impl ListMethods for PossibleCycles {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 
@@ -548,9 +549,9 @@ mod queue {
         let elements = new_collection(&vec, &mut queue);
 
         // Mark to test the removal of the mark
-        queue.into_iter().for_each(|ptr| unsafe {
-            ptr.as_ref().counter_marker().mark(Mark::InList)
-        });
+        queue
+            .into_iter()
+            .for_each(|ptr| unsafe { ptr.as_ref().counter_marker().mark(Mark::InList) });
 
         for elem in vec {
             let removed = queue.poll().expect("Queue has smaller size then expected");
@@ -578,7 +579,7 @@ mod queue {
 
             check_queue(&queue);
         }
-        
+
         assert!(queue.is_empty());
         assert!(queue.peek().is_none());
 
@@ -592,9 +593,9 @@ mod queue {
         let vec = new_collection(&[0, 1, 2, 3], &mut queue);
 
         // Mark to test the removal of the mark
-        queue.into_iter().for_each(|ptr| unsafe {
-            ptr.as_ref().counter_marker().mark(Mark::InList)
-        });
+        queue
+            .into_iter()
+            .for_each(|ptr| unsafe { ptr.as_ref().counter_marker().mark(Mark::InList) });
 
         drop(queue);
 

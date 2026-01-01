@@ -14,7 +14,6 @@
 /// }
 /// ```
 pub use rust_cc_derive::Finalize;
-
 /// Derive macro for safely deriving [`Trace`][`trait@crate::Trace`] implementations.
 ///
 /// The derived implementation calls the [`trace`][`method@crate::Trace::trace`] method on every field of the implementing type.

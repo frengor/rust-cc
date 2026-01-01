@@ -51,12 +51,12 @@ impl TreeNodeWithParent {
             right: Self::new_nested(depth - 1),
         });
 
-        if let Self::Root{ left, right } = &*root {
-            if let Self::Nested { parent, ..} = &**left {
+        if let Self::Root { left, right } = &*root {
+            if let Self::Nested { parent, .. } = &**left {
                 *parent.borrow_mut() = Some(root.clone());
             }
 
-            if let Self::Nested { parent, ..} = &**right {
+            if let Self::Nested { parent, .. } = &**right {
                 *parent.borrow_mut() = Some(root.clone());
             }
         }
@@ -75,12 +75,12 @@ impl TreeNodeWithParent {
             parent: RefCell::new(None),
         });
 
-        if let Self::Nested{ left, right, .. } = &*cc {
-            if let Self::Nested { parent, ..} = &**left {
+        if let Self::Nested { left, right, .. } = &*cc {
+            if let Self::Nested { parent, .. } = &**left {
                 *parent.borrow_mut() = Some(cc.clone());
             }
 
-            if let Self::Nested { parent, ..} = &**right {
+            if let Self::Nested { parent, .. } = &**right {
                 *parent.borrow_mut() = Some(cc.clone());
             }
         }
@@ -90,8 +90,9 @@ impl TreeNodeWithParent {
 
     fn check(&self) -> usize {
         match self {
-            Self::Root { left, right, .. }
-            | Self::Nested { left, right, .. } => left.check() + right.check() + 1,
+            Self::Root { left, right, .. } | Self::Nested { left, right, .. } => {
+                left.check() + right.check() + 1
+            },
             Self::End => 1,
         }
     }

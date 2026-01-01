@@ -300,7 +300,30 @@ fn test_cyclic_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
+            assert!(
+                self.cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .strong_count()
+                    >= 0
+            );
         }
     }
 
@@ -337,7 +360,26 @@ fn test_self_loop_finalization_aliasing() {
         #[allow(unused_comparisons)]
         fn finalize(&self) {
             // The scope of this comparison is to recursively access the same allocation during finalization
-            assert!(self.cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().cc.borrow().as_ref().unwrap().strong_count() >= 0);
+            assert!(
+                self.cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .cc
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .strong_count()
+                    >= 0
+            );
         }
     }
 
@@ -426,8 +468,7 @@ fn buffered_objects_count_test() {
         }
     }
 
-    impl Finalize for Cyclic {
-    }
+    impl Finalize for Cyclic {}
 
     assert_eq!(0, state::buffered_objects_count().unwrap());
 
@@ -454,10 +495,10 @@ fn try_unwrap_test() {
     reset_state();
 
     let cc = Cc::new(5u32);
-    
+
     #[cfg(feature = "weak-ptrs")]
     let weak = cc.downgrade();
-    
+
     let unwrapped = cc.try_unwrap();
     assert_eq!(5, unwrapped.unwrap());
 
@@ -558,6 +599,6 @@ fn cyclic_finalization_try_unwrap_test() {
     *cc.cyclic.borrow_mut() = Some(cc.clone());
     drop(cc);
     collect_cycles();
-    
+
     FINALIZED.with(|fin| assert!(fin.get()));
 }

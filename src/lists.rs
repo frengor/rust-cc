@@ -1,6 +1,6 @@
+use core::cell::Cell;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
-use core::cell::Cell;
 
 use crate::{CcBox, Mark};
 
@@ -86,9 +86,7 @@ impl LinkedList {
 
                 Some(first)
             },
-            None => {
-                None
-            },
+            None => None,
         }
     }
 
@@ -98,7 +96,7 @@ impl LinkedList {
     }
 
     #[inline]
-    pub(crate) fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter<'_> {
         self.into_iter()
     }
 }
@@ -132,9 +130,7 @@ impl IntoIterator for LinkedList {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        ListIter {
-            list: self,
-        }
+        ListIter { list: self }
     }
 }
 
@@ -163,9 +159,7 @@ impl<'a> Iterator for Iter<'a> {
                 }
                 Some(ptr)
             },
-            None => {
-                None
-            },
+            None => None,
         }
     }
 }
@@ -287,9 +281,7 @@ impl PossibleCycles {
 
                 Some(first)
             },
-            None => {
-                None
-            },
+            None => None,
         }
     }
 
@@ -303,7 +295,12 @@ impl PossibleCycles {
     /// * `to_append_size` must be the size of `to_append`
     #[inline]
     #[cfg(feature = "finalization")]
-    pub(crate) unsafe fn mark_self_and_append(&self, mark: Mark, to_append: LinkedList, to_append_size: usize) {
+    pub(crate) unsafe fn mark_self_and_append(
+        &self,
+        mark: Mark,
+        to_append: LinkedList,
+        to_append_size: usize,
+    ) {
         if let Some(mut prev) = self.first.get() {
             for elem in self.iter() {
                 unsafe {
@@ -341,7 +338,7 @@ impl PossibleCycles {
         feature = "finalization",
         all(test, feature = "std") // Unit tests
     ))]
-    pub(crate) fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter<'_> {
         self.into_iter()
     }
 }
@@ -419,9 +416,7 @@ impl LinkedQueue {
 
                 Some(first)
             },
-            None => {
-                None
-            },
+            None => None,
         }
     }
 

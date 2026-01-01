@@ -1,14 +1,17 @@
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use alloc::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use core::ptr::NonNull;
 
-use crate::{CcBox, Trace};
 use crate::counter_marker::Mark;
 use crate::state::State;
+use crate::{CcBox, Trace};
 
 #[inline]
-pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State) -> NonNull<CcBox<T>> {
+pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(
+    layout: Layout,
+    state: &State,
+) -> NonNull<CcBox<T>> {
     state.record_allocation(layout);
-    match NonNull::new(alloc(layout) as *mut CcBox<T>) {
+    match NonNull::new(unsafe { alloc(layout) } as *mut CcBox<T>) {
         Some(ptr) => ptr,
         None => handle_alloc_error(layout),
     }
@@ -18,17 +21,17 @@ pub(crate) unsafe fn cc_alloc<T: Trace + 'static>(layout: Layout, state: &State)
 pub(crate) unsafe fn cc_dealloc<T: ?Sized + Trace + 'static>(
     ptr: NonNull<CcBox<T>>,
     layout: Layout,
-    state: &State
+    state: &State,
 ) {
     state.record_deallocation(layout);
-    dealloc(ptr.cast().as_ptr(), layout);
+    unsafe { dealloc(ptr.cast().as_ptr(), layout) };
 }
 
 #[cfg(any(feature = "weak-ptrs", feature = "cleaners"))]
 #[inline]
 pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
     let layout = Layout::new::<T>();
-    match NonNull::new(alloc(layout) as *mut T) {
+    match NonNull::new(unsafe { alloc(layout) } as *mut T) {
         Some(ptr) => ptr,
         None => handle_alloc_error(layout),
     }
@@ -38,7 +41,7 @@ pub(crate) unsafe fn alloc_other<T>() -> NonNull<T> {
 #[inline]
 pub(crate) unsafe fn dealloc_other<T>(ptr: NonNull<T>) {
     let layout = Layout::new::<T>();
-    dealloc(ptr.cast().as_ptr(), layout);
+    unsafe { dealloc(ptr.cast().as_ptr(), layout) };
 }
 
 #[inline(always)]
@@ -97,8 +100,8 @@ macro_rules! rust_cc_thread_local {
 
 #[cfg(not(feature = "std"))]
 pub(crate) use {
-    rust_cc_thread_local, // When std is not enabled, use the custom macro which uses the #[thread_local] attribute
     no_std_thread_locals::*,
+    rust_cc_thread_local, // When std is not enabled, use the custom macro which uses the #[thread_local] attribute
 };
 
 #[cfg(not(feature = "std"))]
@@ -122,7 +125,7 @@ mod no_std_thread_locals {
 
         #[inline]
         pub(crate) fn with<F, R>(&self, f: F) -> R
-            where
+        where
             F: FnOnce(&T) -> R,
         {
             f(&self.value)
@@ -130,7 +133,7 @@ mod no_std_thread_locals {
 
         #[inline]
         pub(crate) fn try_with<F, R>(&self, f: F) -> Result<R, AccessError>
-            where
+        where
             F: FnOnce(&T) -> R,
         {
             Ok(f(&self.value))
@@ -141,6 +144,7 @@ mod no_std_thread_locals {
 #[cfg(all(test, not(feature = "std")))]
 mod no_std_tests {
     use core::cell::Cell;
+
     use super::no_std_thread_locals::NoStdLocalKey;
 
     rust_cc_thread_local! {
@@ -156,9 +160,7 @@ mod no_std_tests {
 
     #[test]
     fn test_with() {
-        let i = VAL.with(|i| {
-            i.get()
-        });
+        let i = VAL.with(|i| i.get());
         assert_eq!(3, i);
         let i = VAL.with(|i| {
             i.set(i.get() + 1);
@@ -169,14 +171,14 @@ mod no_std_tests {
 
     #[test]
     fn test_try_with() {
-        let i = VAL.try_with(|i| {
-            i.get()
-        }).unwrap();
+        let i = VAL.try_with(|i| i.get()).unwrap();
         assert_eq!(3, i);
-        let i = VAL.try_with(|i| {
-            i.set(i.get() + 1);
-            i.get()
-        }).unwrap();
+        let i = VAL
+            .try_with(|i| {
+                i.set(i.get() + 1);
+                i.get()
+            })
+            .unwrap();
         assert_eq!(4, i);
     }
 
@@ -191,10 +193,12 @@ mod no_std_tests {
 
     #[test]
     fn test_try_with_nested() {
-        let i = VAL.try_with(|i| {
-            i.set(VAL.try_with(|ii| ii.get()).unwrap() + 1);
-            i.get()
-        }).unwrap();
+        let i = VAL
+            .try_with(|i| {
+                i.set(VAL.try_with(|ii| ii.get()).unwrap() + 1);
+                i.get()
+            })
+            .unwrap();
         assert_eq!(4, i);
     }
 }

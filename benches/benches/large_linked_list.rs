@@ -47,16 +47,17 @@ impl List {
 
 #[derive(Trace, Finalize)]
 enum Node {
-    Cons { next: Cc<Node>, previous: RefCell<Option<Cc<Node>>> },
+    Cons {
+        next: Cc<Node>,
+        previous: RefCell<Option<Cc<Node>>>,
+    },
     Nil,
 }
 
 impl Node {
     fn len(&self) -> usize {
         match self {
-            Self::Cons { next, .. } => {
-                next.len() + 1
-            },
+            Self::Cons { next, .. } => next.len() + 1,
             _ => 0,
         }
     }

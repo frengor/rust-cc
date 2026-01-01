@@ -1,27 +1,27 @@
 use alloc::alloc::Layout;
 use alloc::rc::Rc;
+use core::borrow::Borrow;
+use core::cell::Cell;
 use core::cell::UnsafeCell;
+use core::cmp::Ordering;
+use core::fmt::{self, Debug, Display, Formatter, Pointer};
+use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
-use core::ptr::{self, drop_in_place, NonNull};
-use core::borrow::Borrow;
-use core::cell::Cell;
-use core::fmt::{self, Debug, Display, Formatter, Pointer};
-use core::cmp::Ordering;
-use core::hash::{Hash, Hasher};
 use core::panic::{RefUnwindSafe, UnwindSafe};
+use core::ptr::{self, NonNull, drop_in_place};
 #[cfg(feature = "nightly")]
 use core::{
     marker::CoercePointee,
-    ptr::{metadata, DynMetadata},
+    ptr::{DynMetadata, metadata},
 };
 
+use crate::POSSIBLE_CYCLES;
 use crate::counter_marker::{CounterMarker, Mark};
-use crate::state::{replace_state_field, state, State, try_state};
+use crate::state::{State, replace_state_field, state, try_state};
 use crate::trace::{Context, ContextInner, Finalize, Trace};
 use crate::utils::*;
-use crate::POSSIBLE_CYCLES;
 #[cfg(feature = "weak-ptrs")]
 use crate::weak::weak_counter_marker::WeakCounterMarker;
 
@@ -37,15 +37,15 @@ pub struct Cc<#[cfg_attr(feature = "nightly", pointee)] T: ?Sized + Trace + 'sta
 
 impl<T: Trace> Cc<T> {
     /// Creates a new `Cc`.
-    /// 
+    ///
     /// # Collection
-    /// 
+    ///
     /// This method may start a collection when the `auto-collect` feature is enabled.
-    /// 
+    ///
     /// See the [`config` module documentation][`mod@crate::config`] for more details.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the automatically-stared collection panics.
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
@@ -67,9 +67,9 @@ impl<T: Trace> Cc<T> {
     }
 
     /// Returns the inner value, if the [`Cc`] has exactly one strong reference and the collector is not collecting, finalizing or dropping.
-    /// 
+    ///
     /// Otherwise, an [`Err`] is returned with the same [`Cc`] this method was called on.
-    /// 
+    ///
     /// This will succeed even if there are outstanding weak references.
     #[inline]
     #[track_caller]
@@ -122,7 +122,10 @@ impl<T: ?Sized + Trace> Cc<T> {
     /// Returns `true` if the two [`Cc`]s point to the same allocation. This function ignores the metadata of `dyn Trait` pointers.
     #[inline]
     pub fn ptr_eq(this: &Cc<T>, other: &Cc<T>) -> bool {
-        ptr::eq(this.inner.as_ptr() as *const (), other.inner.as_ptr() as *const ())
+        ptr::eq(
+            this.inner.as_ptr() as *const (),
+            other.inner.as_ptr() as *const (),
+        )
     }
 
     /// Returns the number of [`Cc`]s to the pointed allocation.
@@ -132,9 +135,9 @@ impl<T: ?Sized + Trace> Cc<T> {
     }
 
     /// Makes the value in the managed allocation finalizable again.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if called during a collection.
     #[cfg(feature = "finalization")]
     #[inline]
@@ -158,11 +161,11 @@ impl<T: ?Sized + Trace> Cc<T> {
     }
 
     /// Marks the managed allocation as *alive*.
-    /// 
+    ///
     /// Every time a [`Cc`] is dropped, the pointed allocation is buffered to be processed in the next collection.
     /// This method simply removes the managed allocation from the buffer, potentially reducing the amount of work
     /// needed to be done by the collector.
-    /// 
+    ///
     /// This method is a no-op when called on a [`Cc`] pointing to an allocation which is not buffered.
     #[inline]
     pub fn mark_alive(&self) {
@@ -198,9 +201,9 @@ impl<T: ?Sized + Trace> Cc<T> {
 
 impl<T: ?Sized + Trace> Clone for Cc<T> {
     /// Makes a clone of the [`Cc`] pointer.
-    /// 
+    ///
     /// This creates another pointer to the same allocation, increasing the strong reference count.
-    /// 
+    ///
     /// Cloning a [`Cc`] also marks the managed allocation as `alive`. See [`mark_alive`][`Cc::mark_alive`] for more details.
     ///
     /// # Panics
@@ -314,7 +317,8 @@ impl<T: ?Sized + Trace> Drop for Cc<T> {
 
                     #[cfg(feature = "pedantic-debug-assertions")]
                     debug_assert_eq!(
-                        0, self.counter_marker().counter(),
+                        0,
+                        self.counter_marker().counter(),
                         "Trying to deallocate a CcBox with a reference counter > 0"
                     );
 
@@ -460,7 +464,7 @@ impl<T: ?Sized + Trace> CcBox<T> {
     #[cfg(feature = "weak-ptrs")]
     #[inline(always)]
     pub(crate) unsafe fn get_metadata_unchecked(&self) -> NonNull<BoxedMetadata> {
-        self.metadata.get().boxed_metadata
+        unsafe { self.metadata.get().boxed_metadata }
     }
 
     #[cfg(feature = "weak-ptrs")]
@@ -586,10 +590,10 @@ impl CcBox<()> {
         {
             // Set the object as dropped before dropping it
             // This feature is used only in weak pointers, so do this only if they're enabled
-            ptr.as_ref().counter_marker().set_dropped(true);
+            unsafe { ptr.as_ref().counter_marker().set_dropped(true) };
         }
 
-        CcBox::get_traceable(ptr).as_mut().drop_elem();
+        unsafe { CcBox::get_traceable(ptr).as_mut().drop_elem() };
     }
 
     #[inline]
@@ -597,7 +601,7 @@ impl CcBox<()> {
         #[cfg(feature = "nightly")]
         unsafe {
             let vtable = ptr.as_ref().vtable().vtable;
-            NonNull::from_raw_parts(ptr.cast(), vtable)
+            NonNull::from_raw_parts(ptr.cast::<()>(), vtable)
         }
 
         #[cfg(not(feature = "nightly"))]
@@ -623,7 +627,9 @@ impl CcBox<()> {
                     let res = counter_marker.increment_tracing_counter();
                     debug_assert!(res.is_ok());
 
-                    if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
+                    if counter_marker.is_in_list()
+                        && counter_marker.counter() == counter_marker.tracing_counter()
+                    {
                         // ptr is in root_list
 
                         #[cfg(feature = "pedantic-debug-assertions")]
@@ -647,8 +653,13 @@ impl CcBox<()> {
                     counter_marker.mark(Mark::InQueue);
                 }
             },
-            ContextInner::RootTracing { non_root_list, queue } => {
-                if counter_marker.is_in_list() && counter_marker.counter() == counter_marker.tracing_counter() {
+            ContextInner::RootTracing {
+                non_root_list,
+                queue,
+            } => {
+                if counter_marker.is_in_list()
+                    && counter_marker.counter() == counter_marker.tracing_counter()
+                {
                     // ptr is in non_root_list
 
                     #[cfg(feature = "pedantic-debug-assertions")]
@@ -681,14 +692,11 @@ impl Metadata {
 
         #[cfg(not(feature = "nightly"))]
         let vtable = VTable {
-            fat_ptr: unsafe { // SAFETY: the ptr comes from a NotNull ptr
-                NonNull::new_unchecked(cc_box.as_ptr() as *mut dyn InternalTrace)
-            },
+            // SAFETY: the ptr comes from a NotNull ptr
+            fat_ptr: unsafe { NonNull::new_unchecked(cc_box.as_ptr() as *mut dyn InternalTrace) },
         };
 
-        Cell::new(Metadata {
-            vtable
-        })
+        Cell::new(Metadata { vtable })
     }
 }
 
@@ -742,7 +750,7 @@ impl<T: ?Sized + Trace> InternalTrace for CcBox<T> {
     }
 
     unsafe fn drop_elem(&self) {
-        drop_in_place(self.get_elem_mut());
+        unsafe { drop_in_place(self.get_elem_mut()) };
     }
 }
 

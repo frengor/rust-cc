@@ -1,26 +1,23 @@
 //! Non-owning [`Weak`] pointers to an allocation.
-//! 
+//!
 //! The [`downgrade`][`method@Cc::downgrade`] method can be used on a [`Cc`] to create a non-owning [`Weak`][`crate::weak::Weak`] pointer.
 //! A [`Weak`][`crate::weak::Weak`] pointer can be [`upgrade`][`method@Weak::upgrade`]d to a [`Cc`], but this will return
 //! [`None`] if the allocation has already been deallocated.
 
 use alloc::rc::Rc;
-use core::{mem, ptr};
-use core::ptr::{drop_in_place, NonNull};
-#[cfg(feature = "nightly")]
-use core::{
-    marker::Unsize,
-    ops::CoerceUnsized,
-};
 use core::fmt::{self, Debug, Formatter};
-use core::mem::MaybeUninit;
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
+use core::ptr::{NonNull, drop_in_place};
+#[cfg(feature = "nightly")]
+use core::{marker::Unsize, ops::CoerceUnsized};
+use core::{mem, ptr};
 
 use crate::cc::{BoxedMetadata, CcBox};
 use crate::state::try_state;
-use crate::{Cc, Context, Finalize, Trace};
 use crate::utils::{cc_dealloc, dealloc_other};
 use crate::weak::weak_counter_marker::WeakCounterMarker;
+use crate::{Cc, Context, Finalize, Trace};
 
 pub(crate) mod weak_counter_marker;
 
@@ -33,7 +30,7 @@ pub struct Weak<T: ?Sized + Trace + 'static> {
 
 #[cfg(feature = "nightly")]
 impl<T, U> CoerceUnsized<Weak<U>> for Weak<T>
-    where
+where
     T: ?Sized + Trace + Unsize<U> + 'static,
     U: ?Sized + Trace + 'static,
 {
@@ -53,11 +50,11 @@ impl<T: Trace> Weak<T> {
 
 impl<T: ?Sized + Trace> Weak<T> {
     /// Tries to upgrade the weak pointer to a [`Cc`], returning [`None`] if the allocation has already been deallocated.
-    /// 
+    ///
     /// This creates a [`Cc`] pointer to the managed allocation, increasing the strong reference count.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the strong reference count exceeds the maximum supported.
     #[inline]
     #[must_use = "newly created Cc is immediately dropped"]
@@ -96,11 +93,11 @@ impl<T: ?Sized + Trace> Weak<T> {
     }
 
     /// Returns the number of [`Cc`]s to the pointed allocation.
-    /// 
+    ///
     /// If `self` was created using [`Weak::new`], this will return 0.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        if self.weak_counter_marker().map_or(false, |wcm| wcm.is_accessible()) {
+        if self.weak_counter_marker().is_some_and(|wcm| wcm.is_accessible()) {
             // SAFETY: self.cc is still allocated and can be dereferenced
             let counter_marker = unsafe { self.cc.as_ref() }.counter_marker();
 
@@ -114,9 +111,11 @@ impl<T: ?Sized + Trace> Weak<T> {
 
             let counter = counter_marker.counter();
             // Checking if the counter is already 0 avoids doing extra useless work, since the returned value would be the same
-            if counter == 0 || counter_marker.is_dropped() || (
-                   counter_marker.is_in_list_or_queue() && try_state(|state| state.is_dropping()).unwrap_or(true)
-               ) {
+            if counter == 0
+                || counter_marker.is_dropped()
+                || (counter_marker.is_in_list_or_queue()
+                    && try_state(|state| state.is_dropping()).unwrap_or(true))
+            {
                 0
             } else {
                 counter as u32
@@ -127,7 +126,7 @@ impl<T: ?Sized + Trace> Weak<T> {
     }
 
     /// Returns the number of [`Weak`]s to the pointed allocation.
-    /// 
+    ///
     /// If `self` was created using [`Weak::new`], this will return 0.
     #[inline]
     pub fn weak_count(&self) -> u32 {
@@ -143,9 +142,9 @@ impl<T: ?Sized + Trace> Weak<T> {
 
 impl<T: ?Sized + Trace> Clone for Weak<T> {
     /// Makes a clone of the [`Weak`] pointer.
-    /// 
+    ///
     /// This creates another [`Weak`] pointer to the same allocation, increasing the weak reference count.
-    /// 
+    ///
     /// # Panics
     ///
     /// Panics if the weak reference count exceeds the maximum supported.
@@ -157,10 +156,10 @@ impl<T: ?Sized + Trace> Clone for Weak<T> {
             panic!("Cannot clone while tracing!");
         }
 
-        if let Some(wcm) = self.weak_counter_marker() {
-            if wcm.increment_counter().is_err() {
-                panic!("Too many references has been created to a single Weak");
-            }
+        if let Some(wcm) = self.weak_counter_marker()
+            && wcm.increment_counter().is_err()
+        {
+            panic!("Too many references has been created to a single Weak");
         }
 
         Weak {
@@ -174,14 +173,18 @@ impl<T: ?Sized + Trace> Clone for Weak<T> {
 impl<T: ?Sized + Trace> Drop for Weak<T> {
     #[inline]
     fn drop(&mut self) {
-        let Some(metadata) = self.metadata else { return; };
+        let Some(metadata) = self.metadata else {
+            return;
+        };
 
         unsafe {
             // Always decrement the weak counter
             let res = metadata.as_ref().weak_counter_marker.decrement_counter();
             debug_assert!(res.is_ok());
 
-            if metadata.as_ref().weak_counter_marker.counter() == 0 && !metadata.as_ref().weak_counter_marker.is_accessible() {
+            if metadata.as_ref().weak_counter_marker.counter() == 0
+                && !metadata.as_ref().weak_counter_marker.is_accessible()
+            {
                 // No weak pointer is left and the CcBox has been deallocated, so just deallocate the metadata
                 dealloc_other(metadata);
             }
@@ -196,33 +199,26 @@ unsafe impl<T: ?Sized + Trace> Trace for Weak<T> {
     }
 }
 
-impl<T: ?Sized + Trace> Finalize for Weak<T> {
-}
+impl<T: ?Sized + Trace> Finalize for Weak<T> {}
 
 impl<T: Trace> Cc<T> {
     /// Creates a new [`Cc<T>`][`Cc`] while providing a [`Weak<T>`][`Weak`] pointer to the allocation,
     /// to allow the creation of a `T` which holds a weak pointer to itself.
-    /// 
+    ///
     /// # Collection
-    /// 
+    ///
     /// This method may start a collection when the `auto-collect` feature is enabled.
     ///
     /// See the [`config` module documentation][`mod@crate::config`] for more details.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the provided closure or the automatically-stared collection panics.
-    /// 
+    ///
     /// # Example
-#[cfg_attr(
-    feature = "derive",
-    doc = r"```rust"
-)]
-#[cfg_attr(
-    not(feature = "derive"),
-    doc = r"```rust,ignore"
-)]
-#[doc = r"# use rust_cc::*;
+    #[cfg_attr(feature = "derive", doc = r"```rust")]
+    #[cfg_attr(not(feature = "derive"), doc = r"```rust,ignore")]
+    #[doc = r"# use rust_cc::*;
 # use rust_cc::*;
 # use rust_cc::weak::*;
 # use rust_cc_derive::*;
@@ -240,7 +236,7 @@ let cyclic = Cc::new_cyclic(|weak| {
     #[must_use = "newly created Cc is immediately dropped"]
     #[track_caller]
     pub fn new_cyclic<F>(f: F) -> Cc<T>
-        where
+    where
         F: FnOnce(&Weak<T>) -> T,
     {
         #[cfg(debug_assertions)]
@@ -256,7 +252,8 @@ let cyclic = Cc::new_cyclic(|weak| {
         let invalid_cc: NonNull<CcBox<_>> = cc.inner_ptr();
         mem::forget(cc);
 
-        let metadata: NonNull<BoxedMetadata> = unsafe { invalid_cc.as_ref() }.get_or_init_metadata();
+        let metadata: NonNull<BoxedMetadata> =
+            unsafe { invalid_cc.as_ref() }.get_or_init_metadata();
 
         // Set weak counter to 1
         // This is done after creating the Cc to make sure that if Cc::new panics the metadata allocation isn't leaked
@@ -326,7 +323,7 @@ let cyclic = Cc::new_cyclic(|weak| {
 
 impl<T: ?Sized + Trace> Cc<T> {
     /// Creates a new [`Weak`] pointer to the managed allocation, increasing the weak reference count.
-    /// 
+    ///
     /// # Panics
     ///
     /// Panics if the strong reference count exceeds the maximum supported.
@@ -360,7 +357,8 @@ impl<T: ?Sized + Trace> Cc<T> {
         // This function returns an u32 although internally the weak counter is an u16 to have more flexibility for future expansions
         if self.inner().counter_marker().has_allocated_for_metadata() {
             // SAFETY: The metadata has been allocated
-            unsafe { self.inner().get_metadata_unchecked().as_ref() }.weak_counter_marker.counter() as u32
+            unsafe { self.inner().get_metadata_unchecked().as_ref() }.weak_counter_marker.counter()
+                as u32
         } else {
             0
         }

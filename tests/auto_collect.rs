@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 
-use rust_cc::{Cc, collect_cycles, Context, Finalize, Trace};
 use rust_cc::config::config;
 use rust_cc::state::executions_count;
+use rust_cc::{Cc, Context, Finalize, Trace, collect_cycles};
 
 struct Traceable {
     inner: RefCell<Option<Cc<Traceable>>>,
@@ -51,13 +51,21 @@ fn test_auto_collect() {
 
         let executions_counter = executions_count().unwrap();
         drop(traceable);
-        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
+        assert_eq!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Collected but shouldn't have collected."
+        );
 
         let _ = Cc::new(Traceable {
             inner: RefCell::new(None),
             _big: Default::default(),
         }); // Collection should be triggered by allocations
-        assert_ne!(executions_counter, executions_count().unwrap(), "Didn't collected");
+        assert_ne!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Didn't collected"
+        );
     }
     collect_cycles(); // Make sure to don't leak test's memory
 }
@@ -70,7 +78,8 @@ fn test_disable_auto_collect() {
     struct DropGuard;
     impl Drop for DropGuard {
         fn drop(&mut self) {
-            config(|config| config.set_auto_collect(true)).expect("Couldn't re-enable auto-collect");
+            config(|config| config.set_auto_collect(true))
+                .expect("Couldn't re-enable auto-collect");
         }
     }
     let _drop_guard = DropGuard;
@@ -79,15 +88,27 @@ fn test_disable_auto_collect() {
         let executions_counter = executions_count().unwrap();
         let traceable = Traceable::new();
 
-        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
+        assert_eq!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Collected but shouldn't have collected."
+        );
         drop(traceable);
-        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
+        assert_eq!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Collected but shouldn't have collected."
+        );
 
         let _ = Cc::new(Traceable {
             inner: RefCell::new(None),
             _big: Default::default(),
         }); // Collection should be triggered by allocations
-        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
+        assert_eq!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Collected but shouldn't have collected."
+        );
     }
     collect_cycles(); // Make sure to don't leak test's memory
 }
@@ -103,15 +124,20 @@ fn test_buffered_threshold_auto_collect() {
             config(|config| {
                 config.set_adjustment_percent(self.0);
                 config.set_buffered_objects_threshold(self.1);
-            }).expect("Couldn't reset buffered objs threshold and adjustment percent");
+            })
+            .expect("Couldn't reset buffered objs threshold and adjustment percent");
         }
     }
     let _drop_guard = config(|config| {
-        let guard = DropGuard(config.adjustment_percent(), config.buffered_objects_threshold());
+        let guard = DropGuard(
+            config.adjustment_percent(),
+            config.buffered_objects_threshold(),
+        );
         config.set_adjustment_percent(0.0);
         config.set_buffered_objects_threshold(Some(NonZeroUsize::new(3).unwrap()));
         guard
-    }).expect("Couldn't set buffered objs threshold and adjustment percent");
+    })
+    .expect("Couldn't set buffered objs threshold and adjustment percent");
 
     struct Cyclic<T: 'static> {
         cyclic: RefCell<Option<Cc<Cyclic<T>>>>,
@@ -124,8 +150,7 @@ fn test_buffered_threshold_auto_collect() {
         }
     }
 
-    impl<T> Finalize for Cyclic<T> {
-    }
+    impl<T> Finalize for Cyclic<T> {}
 
     fn new<T: Default>() -> Cc<Cyclic<T>> {
         let cc = Cc::new(Cyclic {
@@ -150,11 +175,19 @@ fn test_buffered_threshold_auto_collect() {
     for _ in 0..MAX_BUFFERED_OBJS {
         let _ = new::<()>();
 
-        assert_eq!(executions_counter, executions_count().unwrap(), "Collected but shouldn't have collected.");
+        assert_eq!(
+            executions_counter,
+            executions_count().unwrap(),
+            "Collected but shouldn't have collected."
+        );
     }
 
     let _ = new::<()>();
 
-    assert_eq!(executions_counter + 1, executions_count().unwrap(), "Didn't collected");
+    assert_eq!(
+        executions_counter + 1,
+        executions_count().unwrap(),
+        "Didn't collected"
+    );
     collect_cycles(); // Make sure to don't leak test's memory
 }

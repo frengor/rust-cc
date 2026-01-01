@@ -4,7 +4,9 @@ use alloc::alloc::Layout;
 use alloc::rc::Rc;
 use core::cell::Cell;
 use core::marker::PhantomData;
+
 use thiserror::Error;
+
 use crate::utils;
 
 utils::rust_cc_thread_local! {
@@ -161,7 +163,9 @@ impl Default for State {
 pub fn buffered_objects_count() -> Result<usize, StateAccessError> {
     // Expose this in state module even though the count is kept inside POSSIBLE_CYCLES
     // The error returned in case of failed access is a generic StateAccessError::AccessError
-    crate::POSSIBLE_CYCLES.try_with(|pc| Ok(pc.size())).unwrap_or(Err(StateAccessError::AccessError))
+    crate::POSSIBLE_CYCLES
+        .try_with(|pc| Ok(pc.size()))
+        .unwrap_or(Err(StateAccessError::AccessError))
 }
 
 /// Returns the number of allocated bytes managed by the garbage collector.
@@ -221,7 +225,7 @@ pub(crate) use replace_state_field;
 
 #[cfg(test)]
 mod tests {
-    use crate::state::{state};
+    use crate::state::state;
 
     #[test]
     fn test_replace_state_field() {

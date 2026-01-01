@@ -32,7 +32,7 @@ pub(crate) const MAX: u16 = COUNTER_MASK - 1;
 ///   * `IN_LIST`: in `root_list` or `non_root_list`
 ///   * `IN_QUEUE`: in queue to be traced
 /// * `B` is the tracing counter. The max value (the one with every bit set to 1) is reserved
-///       and indicates that the allocated value has already been dropped (but not yet deallocated)
+///   and indicates that the allocated value has already been dropped (but not yet deallocated)
 /// * `C` is `1` when metadata has been allocated, `0` otherwise
 /// * `D` is `1` when the element inside `CcBox` has already been finalized, `0` otherwise
 /// * `E` is the reference counter. The max value (the one with every bit set to 1) is reserved and should not be used
@@ -61,7 +61,7 @@ impl CounterMarker {
     #[inline]
     pub(crate) fn increment_counter(&self) -> Result<(), OverflowError> {
         debug_assert!(self.counter() != COUNTER_MASK); // Check for reserved value
-        
+
         if self.counter() == MAX {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)
@@ -74,7 +74,7 @@ impl CounterMarker {
     #[inline]
     pub(crate) fn decrement_counter(&self) -> Result<(), OverflowError> {
         debug_assert!(self.counter() != COUNTER_MASK); // Check for reserved value
-        
+
         if self.counter() == 0 {
             utils::cold(); // This branch of the if is rarely taken
             Err(OverflowError)

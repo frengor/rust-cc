@@ -1,18 +1,18 @@
 #![cfg(test)]
 
-use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
-use crate::trace::Trace;
-use crate::{state, Cc, Context, Finalize, POSSIBLE_CYCLES};
 use crate::state::state;
+use crate::trace::Trace;
+use crate::{Cc, Context, Finalize, POSSIBLE_CYCLES, state};
 
 mod bench_code;
 mod cc;
+mod counter_marker;
 mod lists;
 mod panicking;
-mod counter_marker;
 
 #[cfg(feature = "weak-ptrs")]
 mod weak;
@@ -26,7 +26,7 @@ pub(crate) fn reset_state() {
 
     #[cfg(feature = "auto-collect")]
     {
-        use super::config::{config, Config};
+        use super::config::{Config, config};
         config(|config| *config = Config::default()).expect("Couldn't reset the config.");
     }
 }
