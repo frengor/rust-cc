@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/rust-cc?style=flat)](https://docs.rs/rust-cc/latest/rust_cc/)
 [![Crates.io Version](https://img.shields.io/crates/v/rust-cc?style=flat&color=blue)](https://crates.io/crates/rust-cc)
 [![License](https://img.shields.io/crates/l/rust-cc?color=orange)](https://github.com/frengor/rust-cc#license)
-
+ 
 A fast garbage collector based on cycle collection for Rust programs.
 
 This crate provides a `Cc` (Cycle Collected) smart pointer, which is basically a `Rc` that automatically detects and 
