@@ -195,6 +195,7 @@ fn test_for_each_clearing_panic() {
         }
     }
 
+    #[allow(clippy::never_loop)] // Come on Clippy, it's done on purpose =(
     let res = catch_unwind(AssertUnwindSafe(|| list.into_iter().for_each(|ptr| {
         // Manually set mark for the first CcBox, the others should be handled by List::drop
         unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
@@ -387,7 +388,7 @@ trait ListMethods: CommonMethods {
 
     fn is_empty(&self) -> bool;
 
-    fn iter(&self) -> Iter;
+    fn iter(&self) -> Iter<'_>;
 
     fn assert_size(&self, expected_size: usize);
 }
@@ -415,7 +416,7 @@ impl ListMethods for LinkedList {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 
@@ -447,7 +448,7 @@ impl ListMethods for PossibleCycles {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 

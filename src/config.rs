@@ -179,6 +179,7 @@ impl Config {
         // First case: the threshold might have to be increased
         if state.allocated_bytes() >= self.bytes_threshold {
 
+            #[allow(clippy::while_let_loop)]
             loop {
                 let Some(new_threshold) = self.bytes_threshold.checked_shl(1) else { break; };
                 self.bytes_threshold = new_threshold;

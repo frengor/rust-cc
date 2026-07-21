@@ -1,7 +1,7 @@
 error[E0119]: conflicting implementations of trait `Drop` for type `MyStruct`
   --> tests/derive_macro_tests/invalid_drop_impl.rs:3:10
    |
-3  | #[derive(Trace)]
+ 3 | #[derive(Trace)]
    |          ^^^^^ conflicting implementation for `MyStruct`
 ...
 11 | impl Drop for MyStruct {

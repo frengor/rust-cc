@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use rust_cc::*;
 

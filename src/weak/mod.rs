@@ -100,7 +100,7 @@ impl<T: ?Sized + Trace> Weak<T> {
     /// If `self` was created using [`Weak::new`], this will return 0.
     #[inline]
     pub fn strong_count(&self) -> u32 {
-        if self.weak_counter_marker().map_or(false, |wcm| wcm.is_accessible()) {
+        if self.weak_counter_marker().is_some_and(|wcm| wcm.is_accessible()) {
             // SAFETY: self.cc is still allocated and can be dereferenced
             let counter_marker = unsafe { self.cc.as_ref() }.counter_marker();
 
