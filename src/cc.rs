@@ -30,7 +30,7 @@ use crate::weak::weak_counter_marker::WeakCounterMarker;
 /// See the [module-level documentation][`mod@crate`] for more details.
 #[cfg_attr(feature = "nightly", derive(CoercePointee))]
 #[repr(transparent)]
-pub struct Cc<#[cfg_attr(feature = "nightly", pointee)] T: ?Sized + Trace + 'static> {
+pub struct Cc<T: ?Sized + Trace + 'static> {
     inner: NonNull<CcBox<T>>,
     _phantom: PhantomData<Rc<T>>, // Make Cc !Send and !Sync
 }
@@ -597,7 +597,7 @@ impl CcBox<()> {
         #[cfg(feature = "nightly")]
         unsafe {
             let vtable = ptr.as_ref().vtable().vtable;
-            NonNull::from_raw_parts(ptr.cast(), vtable)
+            NonNull::from_raw_parts(ptr, vtable)
         }
 
         #[cfg(not(feature = "nightly"))]

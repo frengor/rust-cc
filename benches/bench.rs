@@ -8,7 +8,7 @@ mod benches {
 }
 
 use std::hint::black_box;
-use iai_callgrind::{library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, main};
+use gungraun::{library_benchmark, library_benchmark_group, main, Callgrind, LibraryBenchmarkConfig};
 use crate::benches::binary_trees::count_binary_trees;
 use crate::benches::binary_trees_with_parent_pointers::count_binary_trees_with_parent;
 use crate::benches::large_linked_list::large_linked_list;
@@ -17,25 +17,25 @@ use crate::benches::stress_test::stress_test;
 #[library_benchmark]
 #[bench::seed(0xCAFE)]
 fn stress_test_bench(seed: u64) -> Vec<usize> {
-    black_box(stress_test(seed))
+    black_box(stress_test(black_box(seed)))
 }
 
 #[library_benchmark]
 #[bench::depth(11)]
 fn count_binary_trees_bench(depth: usize) -> Vec<usize> {
-    black_box(count_binary_trees(depth))
+    black_box(count_binary_trees(black_box(depth)))
 }
 
 #[library_benchmark]
 #[bench::depth(11)]
 fn count_binary_trees_with_parent_bench(depth: usize) -> Vec<usize> {
-    black_box(count_binary_trees_with_parent(depth))
+    black_box(count_binary_trees_with_parent(black_box(depth)))
 }
 
 #[library_benchmark]
 #[bench::size(4096)]
 fn large_linked_list_bench(size: usize) -> Vec<usize> {
-    black_box(large_linked_list(size))
+    black_box(large_linked_list(black_box(size)))
 }
 
 library_benchmark_group!(
@@ -54,6 +54,6 @@ library_benchmark_group!(
 );
 
 main!(
-    config = LibraryBenchmarkConfig::default().raw_callgrind_args(["--branch-sim=yes"]);
+    config = LibraryBenchmarkConfig::default().tool(Callgrind::with_args(["--branch-sim=yes"]));
     library_benchmark_groups = stress_tests_group, binary_trees_group, linked_lists_group
 );

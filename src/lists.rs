@@ -98,7 +98,7 @@ impl LinkedList {
     }
 
     #[inline]
-    pub(crate) fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter<'_> {
         self.into_iter()
     }
 }
@@ -341,7 +341,7 @@ impl PossibleCycles {
         feature = "finalization",
         all(test, feature = "std") // Unit tests
     ))]
-    pub(crate) fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter<'_> {
         self.into_iter()
     }
 }
