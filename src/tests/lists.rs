@@ -388,7 +388,7 @@ trait ListMethods: CommonMethods {
 
     fn is_empty(&self) -> bool;
 
-    fn iter(&self) -> Iter;
+    fn iter(&self) -> Iter<'_>;
 
     fn assert_size(&self, expected_size: usize);
 }
@@ -416,7 +416,7 @@ impl ListMethods for LinkedList {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 
@@ -448,7 +448,7 @@ impl ListMethods for PossibleCycles {
         self.is_empty()
     }
 
-    fn iter(&self) -> Iter {
+    fn iter(&self) -> Iter<'_> {
         self.iter()
     }
 
