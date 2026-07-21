@@ -8,7 +8,7 @@ mod benches {
 }
 
 use std::hint::black_box;
-use gungraun::{library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, main, Callgrind, CallgrindMetrics};
 use crate::benches::binary_trees::count_binary_trees;
 use crate::benches::binary_trees_with_parent_pointers::count_binary_trees_with_parent;
 use crate::benches::large_linked_list::large_linked_list;
@@ -54,5 +54,6 @@ library_benchmark_group!(
 );
 
 main!(
+    config = LibraryBenchmarkConfig::default().tool(Callgrind::with_args(["--branch-sim=yes"]));
     library_benchmark_groups = stress_tests_group, binary_trees_group, linked_lists_group
 );
