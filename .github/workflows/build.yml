@@ -13,7 +13,7 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -27,7 +27,7 @@ jobs:
   on-nightly:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
@@ -40,7 +40,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - name: Build docs
         run: cargo doc --no-deps --all-features --verbose

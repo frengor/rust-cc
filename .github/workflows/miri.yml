@@ -10,7 +10,7 @@ jobs:
   test-with-miri-stable:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       # From Miri documentation: https://github.com/rust-lang/miri#running-miri-on-ci
       - name: Install Miri
         run: |
@@ -27,7 +27,7 @@ jobs:
   test-with-miri-nightly:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       # From Miri documentation: https://github.com/rust-lang/miri#running-miri-on-ci
       - name: Install Miri
         run: |

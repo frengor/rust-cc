@@ -6,7 +6,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  IAI_CALLGRIND_COLOR: never
+  GUNGRAUN_COLOR: never
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
@@ -19,24 +19,17 @@ jobs:
       URL: ${{ github.event.pull_request.comments_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref }}
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@valgrind
-      - uses: taiki-e/install-action@cargo-binstall
-      - name: Install iai-callgrind-runner
-        run: |
-          version=$(cargo metadata --format-version=1 |\
-            jq '.packages[] | select(.name == "iai-callgrind").version' |\
-            tr -d '"'
-          )
-          cargo binstall --no-confirm --no-symlinks iai-callgrind-runner --version "${version}"
+      - name: Setup gungraun-runner and Valgrind
+        uses: gungraun/setup-gungraun@v1
       - name: Bench base branch
         run: |
           cargo update
           cargo bench -q --bench bench > "${WORKSPACE}"/____old_results.txt
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           clean: false
@@ -44,7 +37,7 @@ jobs:
         run: |
           cargo update
           cargo bench -q --bench bench > "${WORKSPACE}"/____results.txt
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           clean: false
@@ -53,7 +46,7 @@ jobs:
           cargo clean
           cargo update
           cargo bench --no-default-features -F std,derive,auto-collect -q --bench bench > "${WORKSPACE}"/____old_results_no_finalization.txt
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           clean: false
@@ -92,9 +85,9 @@ jobs:
             echo '```'
             echo '</p></details></p></details>'
           } > "${WORKSPACE}"/__result.txt
-      - uses: thollander/actions-comment-pull-request@v2.3.1
+      - uses: thollander/actions-comment-pull-request@v3
         with:
-          filePath: '__result.txt'
+          file-path: '__result.txt'
           mode: recreate
       - name: Remove label
         uses: actions-ecosystem/action-remove-labels@v1.3.0

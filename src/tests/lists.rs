@@ -195,6 +195,7 @@ fn test_for_each_clearing_panic() {
         }
     }
 
+    #[allow(clippy::never_loop)] // Come on Clippy, it's done on purpose =(
     let res = catch_unwind(AssertUnwindSafe(|| list.into_iter().for_each(|ptr| {
         // Manually set mark for the first CcBox, the others should be handled by List::drop
         unsafe { ptr.as_ref().counter_marker().mark(Mark::NonMarked) };
